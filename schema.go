@@ -56,6 +56,7 @@ type Field struct {
 	Name         string
 	NativeName   string
 	Type         SchemaType
+	ItemType     string
 	NativeType   string
 	Description  string
 	Relationship Relationship
@@ -149,9 +150,24 @@ func parseSchema(value any) (*Schema, error) {
 				p.IsPrimary = true
 			case "rel":
 				p.RelConfig = v
-				// TODO 预计算引用结构体名称
-				sf := structs.New(fieldValue)
-				p.Relationship.DstSchemaName = sf.Name()
+				fieldReflectType := reflect.TypeOf(fieldValue)
+				if fieldReflectType.Kind() == reflect.Ptr {
+					fieldReflectType = fieldReflectType.Elem()
+				}
+
+				if fieldReflectType.Kind() == reflect.Array || fieldReflectType.Kind() == reflect.Slice {
+					elemType := fieldReflectType.Elem()
+					if elemType.Kind() == reflect.Ptr {
+						elemType = elemType.Elem()
+					}
+					fieldZeroValue := reflect.New(elemType).Interface()
+					fieldStructs := structs.New(fieldZeroValue)
+					p.Relationship.DstSchemaName = fieldStructs.Name()
+				} else {
+					fieldZeroValue := reflect.New(fieldReflectType).Interface()
+					fieldStructs := structs.New(fieldZeroValue)
+					p.Relationship.DstSchemaName = fieldStructs.Name()
+				}
 			}
 		}
 		if p.Type == "" {
@@ -218,6 +234,8 @@ func parseRel(config string, currentSchema *Schema, currentField *Field, allSche
 		Kind:          kind,
 		SrcSchemaName: currentSchema.Name,
 	}
+
+	_ = mergo.Merge(&rel, &currentField.Relationship)
 	switch kind {
 	case RelationshipHasOne,
 		RelationshipHasMany,
@@ -231,11 +249,9 @@ func parseRel(config string, currentSchema *Schema, currentField *Field, allSche
 		}
 		rel.SrcSchemaField = split[0]
 		rel.DstSchemaField = split[1]
-		rel.DstSchemaName = currentField.Name // TODO 需要使用结构体所在名字
 	case RelationshipRefMany:
 		// 直接对表：REF_MANY,UserDept(ID->UserID,ID->DeptID)
 		// 对结构体：REF_MANY,user_role_ref(id->user_id,id->role_id)
-		rel.DstSchemaName = currentField.Name // TODO 需要使用结构体所在名字
 		fi := strings.Index(others, "(")
 		li := strings.LastIndex(others, ")")
 		rel.BrgSchemaName = others[:fi]

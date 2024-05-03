@@ -1,7 +1,6 @@
 package dba
 
 import (
-	"dario.cat/mergo"
 	"fmt"
 	"github.com/pkg/errors"
 	"gorm.io/driver/mysql"
@@ -111,7 +110,6 @@ func (ns *Namespace) RepairRelationships() {
 		for fieldName, field := range schema.Fields {
 			if field.RelConfig != "" {
 				rel := parseRel(field.RelConfig, schema, &field, schemas)
-				_ = mergo.Merge(rel, &field.Relationship)
 				if rel != nil {
 					needUpdate = true
 					field.Relationship = *rel
