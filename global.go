@@ -33,6 +33,10 @@ func LookupSchema(name string) *Schema {
 	return DefaultNamespace.LookupSchema(name)
 }
 
-func Schemas() map[string]*Schema {
-	return DefaultNamespace.Schemas()
+func Schemas(name ...string) map[string]*Schema {
+	return DefaultNamespace.Schemas(name...)
+}
+
+func GenDDL(schemas map[string]*Schema, dsnName ...string) string {
+	return DefaultNamespace.LookupConnection(dsnName...).GenDDL(schemas)
 }

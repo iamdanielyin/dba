@@ -1,11 +1,14 @@
 package main
 
 import (
+	_ "ariga.io/atlas-provider-gorm/gormschema"
+	"fmt"
 	"github.com/iamdanielyin/dba"
 	"github.com/iamdanielyin/dba/examples/schemas"
 	_ "github.com/joho/godotenv/autoload"
 	"log"
 	"os"
+	"time"
 )
 
 func main() {
@@ -13,12 +16,12 @@ func main() {
 		log.Fatal(err)
 	}
 	err := dba.RegisterSchemas(
-		&schemas.Org{},
-		&schemas.User{},
-		&schemas.Profile{},
-		&schemas.Account{},
-		&schemas.Dept{},
-		&schemas.UserDept{},
+		//&schemas.Org{},
+		//&schemas.User{},
+		//&schemas.Profile{},
+		//&schemas.Account{},
+		//&schemas.Dept{},
+		//&schemas.UserDept{},
 		&schemas.Role{},
 		&schemas.Permission{},
 	)
@@ -26,7 +29,12 @@ func main() {
 		log.Fatal(err)
 	}
 	allSchemas := dba.Schemas()
-	log.Println(dba.JSONStringify(allSchemas))
+	_ = os.WriteFile("schemas.json", []byte(dba.JSONStringify(allSchemas, true)), os.ModePerm)
+
+	if ddl := dba.GenDDL(allSchemas); ddl != "" {
+		_ = dba.EnsureDir("migrations")
+		_ = os.WriteFile(fmt.Sprintf("migrations/%s.sql", time.Now().Format("20060102150405")), []byte(ddl), os.ModePerm)
+	}
 	//testSchemaNames := []string{
 	//	"Org",
 	//	"User",

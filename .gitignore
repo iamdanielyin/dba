@@ -21,3 +21,5 @@
 go.work
 .idea
 examples/**/.env
+examples/**/migrations
+examples/**/schemas.json

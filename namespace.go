@@ -26,12 +26,6 @@ func (ns *Namespace) Connect(name string, drv Driver, dsn string) (*Connection, 
 	if err != nil {
 		return nil, errors.Wrap(err, "dba: connect failed")
 	}
-	conn := &Connection{
-		driver: drv,
-		dsn:    dsn,
-		name:   name,
-		gdb:    gdb,
-	}
 	if name == "" {
 		count := 0
 		ns.connections.Range(func(key, value interface{}) bool {
@@ -40,12 +34,22 @@ func (ns *Namespace) Connect(name string, drv Driver, dsn string) (*Connection, 
 		})
 		name = fmt.Sprintf("%d", count)
 	}
+	conn := &Connection{
+		driver: drv,
+		dsn:    dsn,
+		name:   name,
+		gdb:    gdb,
+	}
 	ns.connections.Store(name, conn)
 	return conn, nil
 }
 
-func (ns *Namespace) LookupConnection(name string) *Connection {
-	conn, ok := ns.connections.Load(name)
+func (ns *Namespace) LookupConnection(name ...string) *Connection {
+	key := "0"
+	if len(name) > 0 && name[0] != "" {
+		key = name[0]
+	}
+	conn, ok := ns.connections.Load(key)
 	if !ok {
 		return nil
 	}
@@ -93,11 +97,18 @@ func (ns *Namespace) LookupSchema(name string) *Schema {
 	return original.Clone()
 }
 
-func (ns *Namespace) Schemas() map[string]*Schema {
+func (ns *Namespace) Schemas(names ...string) map[string]*Schema {
+	nameMap := make(map[string]bool)
+	for _, name := range names {
+		nameMap[name] = true
+	}
 	schemas := make(map[string]*Schema)
 	ns.schemas.Range(func(key, value any) bool {
 		copied := value.(*Schema).Clone()
-		schemas[key.(string)] = copied
+		name := key.(string)
+		if len(nameMap) == 0 || nameMap[name] {
+			schemas[name] = copied
+		}
 		return true
 	})
 	return schemas
@@ -114,7 +125,13 @@ func (ns *Namespace) RepairRelationships() {
 					needUpdate = true
 					field.Relationship = *rel
 				}
+				if field.ItemType != "" {
+					if !allBasicTypeMap[SchemaType(field.ItemType)] && schemas[field.ItemType] == nil {
+						field.ItemType = ""
+					}
+				}
 				schema.Fields[fieldName] = field
+
 			}
 		}
 		if needUpdate {
