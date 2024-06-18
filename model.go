@@ -18,6 +18,20 @@ func (dm *DataModel) CreateInBatches(value any, batchSize int) error {
 	return dm.conn.gdb.CreateInBatches(value, batchSize).Error
 }
 
+func (dm *DataModel) parseMap(v map[string]any) []*Entry {
+	var entries []*Entry
+	for key, val := range v {
+		key = strings.TrimSpace(key)
+		if key != "" && val != nil {
+			entries = append(entries, &Entry{
+				Key:   key,
+				Value: val,
+			})
+		}
+	}
+	return entries
+}
+
 func (dm *DataModel) parseConditions(conditions []any) []*Filter {
 	// 支持以下几种传参模式
 	// 1、dba.Cond
@@ -61,37 +75,17 @@ func (dm *DataModel) parseConditions(conditions []any) []*Filter {
 		switch v := item.(type) {
 		case Cond:
 			// Cond
-			var entries []*Entry
-			for key, val := range v {
-				key = strings.TrimSpace(key)
-				if key != "" && val != nil {
-					entries = append(entries, &Entry{
-						Key:   key,
-						Value: val,
-					})
-				}
-			}
 			filters = append(filters, &Filter{
 				operator:  filterOperatorAnd,
 				entryType: entryTypeEntryList,
-				entryList: entries,
+				entryList: dm.parseMap(v),
 			})
 		case map[string]any:
 			// map
-			var entries []*Entry
-			for key, val := range v {
-				key = strings.TrimSpace(key)
-				if key != "" && val != nil {
-					entries = append(entries, &Entry{
-						Key:   key,
-						Value: val,
-					})
-				}
-			}
 			filters = append(filters, &Filter{
 				operator:  filterOperatorAnd,
 				entryType: entryTypeEntryList,
-				entryList: entries,
+				entryList: dm.parseMap(v),
 			})
 		default:
 			reflectValue := reflect.Indirect(reflect.ValueOf(item))
