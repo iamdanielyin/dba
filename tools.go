@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -458,4 +459,46 @@ func MD5Str(str string) string {
 	h := md5.New()
 	h.Write([]byte(str))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// ParseStruct recursively parses a struct or a pointer to a struct and returns a map[string]any.
+func ParseStruct(data any) map[string]any {
+	result := make(map[string]any)
+	parseStruct(reflect.ValueOf(data), result)
+	return result
+}
+
+// parseStruct is the recursive function that does the actual parsing.
+func parseStruct(value reflect.Value, result map[string]any) {
+	if value.Kind() == reflect.Ptr {
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Struct {
+		return
+	}
+
+	t := value.Type()
+	for i := 0; i < value.NumField(); i++ {
+		field := t.Field(i)
+		fieldValue := value.Field(i)
+
+		// Skip unexported fields
+		if !field.IsExported() {
+			continue
+		}
+
+		// Handle anonymous fields (embedded structs)
+		if field.Anonymous {
+			parseStruct(fieldValue, result)
+			continue
+		}
+
+		if fieldValue.Kind() == reflect.Struct {
+			nestedResult := make(map[string]any)
+			parseStruct(fieldValue, nestedResult)
+			result[field.Name] = nestedResult
+		} else {
+			result[field.Name] = fieldValue.Interface()
+		}
+	}
 }

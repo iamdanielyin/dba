@@ -138,6 +138,10 @@ type Relationship struct {
 	BrgIsNative       bool   `json:"brg_is_native,omitempty"`
 }
 
+func (rs Relationship) Valid() bool {
+	return rs.Kind != ""
+}
+
 func ParseSchemas(values ...any) ([]*Schema, error) {
 	var results []*Schema
 	for _, value := range values {

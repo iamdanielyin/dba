@@ -75,7 +75,7 @@ func (ns *Namespace) DisconnectAll() {
 	ns.Disconnect(ns.ConnectionNames()...)
 }
 
-func (ns *Namespace) RegisterSchemas(value ...any) error {
+func (ns *Namespace) RegisterSchema(value ...any) error {
 	ss, err := ParseSchemas(value...)
 	if err != nil {
 		return err
@@ -137,5 +137,26 @@ func (ns *Namespace) RepairRelationships() {
 		if needUpdate {
 			ns.schemas.Store(schemaName, schema)
 		}
+	}
+}
+
+func (ns *Namespace) Model(schemaName string) *DataModel {
+	return ns.ModelBySession("", schemaName)
+}
+
+func (ns *Namespace) ModelBySession(connectionName, schemaName string) *DataModel {
+	conn := ns.LookupConnection(connectionName)
+	if conn == nil {
+		panic(fmt.Errorf("connection not exists: %s", connectionName))
+	}
+
+	schema := ns.LookupSchema(schemaName)
+	if schema == nil {
+		panic(fmt.Errorf("schema not exists: %s", schemaName))
+	}
+
+	return &DataModel{
+		conn:   conn,
+		schema: schema,
 	}
 }

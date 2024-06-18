@@ -25,8 +25,8 @@ func DisconnectAll() {
 	DefaultNamespace.DisconnectAll()
 }
 
-func RegisterSchemas(values ...any) error {
-	return DefaultNamespace.RegisterSchemas(values...)
+func RegisterSchema(values ...any) error {
+	return DefaultNamespace.RegisterSchema(values...)
 }
 
 func LookupSchema(name string) *Schema {
