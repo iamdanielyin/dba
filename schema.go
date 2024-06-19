@@ -67,6 +67,33 @@ func (s *Schema) Clone() *Schema {
 	return copied
 }
 
+func (s *Schema) ParseValue(data any, useNativeName bool) map[string]any {
+	values := make(map[string]any)
+
+	switch reflect.Indirect(reflect.ValueOf(data)).Kind() {
+	case reflect.Map:
+		values = data.(map[string]any)
+	case reflect.Struct:
+		values = ParseStruct(data)
+	default:
+	}
+
+	result := make(map[string]any)
+	if useNativeName {
+		for key, val := range values {
+			if field := s.Fields[key]; field.Valid() {
+				result[field.NativeName] = val
+			} else {
+				result[key] = val
+			}
+		}
+	} else {
+		result = values
+	}
+
+	return result
+}
+
 func (s *Schema) Cache() *sync.Map {
 	if s.cache == nil {
 		s.cache = new(sync.Map)
@@ -123,6 +150,10 @@ type Field struct {
 	// TODO 枚举值配置实现
 	//IsEnum         bool
 	//EnumConfig     string
+}
+
+func (f *Field) Valid() bool {
+	return f.Type != ""
 }
 
 type Relationship struct {

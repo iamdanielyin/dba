@@ -155,8 +155,13 @@ func (ns *Namespace) ModelBySession(connectionName, schemaName string) *DataMode
 		panic(fmt.Errorf("schema not exists: %s", schemaName))
 	}
 
+	gdb := conn.gdb.Session(&gorm.Session{
+		NewDB: true,
+	})
+	gdb.Table(schema.NativeName)
 	return &DataModel{
 		conn:   conn,
 		schema: schema,
+		gdb:    gdb,
 	}
 }

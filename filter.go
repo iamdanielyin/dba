@@ -20,8 +20,26 @@ const (
 	filterOperatorOr  filterOperator = "OR"
 )
 
+type entryOp string
+
+const (
+	entryOpEqual              entryOp = "="
+	entryOpNotEqual           entryOp = "!="
+	entryOpLike               entryOp = "LIKE"
+	entryOpPrefix             entryOp = "PREF"
+	entryOpSuffix             entryOp = "SUFF"
+	entryOpGreaterThan        entryOp = ">"
+	entryOpGreaterThanOrEqual entryOp = ">="
+	entryOpLessThan           entryOp = "<"
+	entryOpLessThanOrEqual    entryOp = "<="
+	entryOpIn                 entryOp = "IN"
+	entryOpNotIn              entryOp = "NIN"
+	entryOpExists             entryOp = "EXISTS"
+)
+
 type Entry struct {
 	Key   string
+	Op    entryOp
 	Value any
 }
 
