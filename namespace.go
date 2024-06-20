@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/pkg/errors"
 	"gorm.io/driver/mysql"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"sync"
 )
@@ -19,6 +20,8 @@ func (ns *Namespace) Connect(name string, drv Driver, dsn string) (*Connection, 
 	switch drv {
 	case MYSQL:
 		dial = mysql.Open(dsn)
+	case SQLITE:
+		dial = sqlite.Open(dsn)
 	default:
 		return nil, errors.Errorf("dba: invalid driver: %s", drv)
 	}
@@ -35,6 +38,7 @@ func (ns *Namespace) Connect(name string, drv Driver, dsn string) (*Connection, 
 		name = fmt.Sprintf("%d", count)
 	}
 	conn := &Connection{
+		ns:     ns,
 		driver: drv,
 		dsn:    dsn,
 		name:   name,
@@ -44,10 +48,10 @@ func (ns *Namespace) Connect(name string, drv Driver, dsn string) (*Connection, 
 	return conn, nil
 }
 
-func (ns *Namespace) LookupConnection(name ...string) *Connection {
+func (ns *Namespace) Session(connectionName ...string) *Connection {
 	key := "0"
-	if len(name) > 0 && name[0] != "" {
-		key = name[0]
+	if len(connectionName) > 0 && connectionName[0] != "" {
+		key = connectionName[0]
 	}
 	conn, ok := ns.connections.Load(key)
 	if !ok {
@@ -144,8 +148,23 @@ func (ns *Namespace) Model(schemaName string) *DataModel {
 	return ns.ModelBySession("", schemaName)
 }
 
+func (ns *Namespace) Init(connectionName ...string) error {
+	schemas := ns.Schemas()
+	if len(connectionName) == 0 {
+		connectionName = append(connectionName, "")
+	}
+	for _, name := range connectionName {
+		conn := ns.Session(name)
+		ddl := conn.GenDDL(schemas, true)
+		if _, err := conn.Exec(ddl); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (ns *Namespace) ModelBySession(connectionName, schemaName string) *DataModel {
-	conn := ns.LookupConnection(connectionName)
+	conn := ns.Session(connectionName)
 	if conn == nil {
 		panic(fmt.Errorf("connection not exists: %s", connectionName))
 	}
@@ -155,9 +174,7 @@ func (ns *Namespace) ModelBySession(connectionName, schemaName string) *DataMode
 		panic(fmt.Errorf("schema not exists: %s", schemaName))
 	}
 
-	gdb := conn.gdb.Session(&gorm.Session{
-		NewDB: true,
-	})
+	gdb := conn.NewDB()
 	gdb.Table(schema.NativeName)
 	return &DataModel{
 		conn:   conn,

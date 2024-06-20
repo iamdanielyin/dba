@@ -20,6 +20,10 @@
 # Go workspace file
 go.work
 .idea
+.env
 examples/**/.env
 examples/**/migrations
 examples/**/schemas.json
+test.db
+schemas.json
+migrations/

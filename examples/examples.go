@@ -1,4 +1,4 @@
-package schemas
+package examples
 
 import (
 	"github.com/guregu/null/v5"

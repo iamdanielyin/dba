@@ -502,3 +502,10 @@ func parseStruct(value reflect.Value, result map[string]any) {
 		}
 	}
 }
+
+func iferr(err error) bool {
+	if err != nil {
+		return true
+	}
+	return false
+}

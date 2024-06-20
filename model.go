@@ -17,11 +17,11 @@ type DataModel struct {
 }
 
 func (dm *DataModel) Create(value any) error {
-	return dm.gdb.Create(value).Error
+	return dm.gdb.Table(dm.schema.NativeName).Create(value).Error
 }
 
 func (dm *DataModel) CreateInBatches(value any, batchSize int) error {
-	return dm.gdb.CreateInBatches(value, batchSize).Error
+	return dm.gdb.Table(dm.schema.NativeName).CreateInBatches(value, batchSize).Error
 }
 
 func (dm *DataModel) parseEntryList(v map[string]any) []*Entry {
@@ -290,7 +290,7 @@ func (r *Result) One(dst any) error {
 	r.setOrderBys(gdb, r.orderBys)
 	r.setLimitAndOffset(gdb, r.limit, r.offset)
 
-	if err := gdb.First(dst).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := gdb.Table(r.dm.schema.NativeName).First(dst).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
 	return nil
@@ -302,7 +302,7 @@ func (r *Result) All(dst any) error {
 	r.setOrderBys(gdb, r.orderBys)
 	r.setLimitAndOffset(gdb, r.limit, r.offset)
 
-	return gdb.Find(dst).Error
+	return gdb.Table(r.dm.schema.NativeName).Find(dst).Error
 }
 
 func (r *Result) Count() (int, error) {
@@ -312,7 +312,7 @@ func (r *Result) Count() (int, error) {
 	r.setLimitAndOffset(gdb, r.limit, r.offset)
 
 	var count int64
-	err := gdb.Count(&count).Error
+	err := gdb.Table(r.dm.schema.NativeName).Count(&count).Error
 	return int(count), err
 }
 
@@ -325,7 +325,7 @@ func (r *Result) FindByPage(pageNum int, pageSize int, dst any) (totalRecords in
 
 	gdb := r.dm.gdb
 	var count int64
-	if err = gdb.Limit(-1).Offset(-1).Count(&count).Error; err == nil {
+	if err = gdb.Table(r.dm.schema.NativeName).Limit(-1).Offset(-1).Count(&count).Error; err == nil {
 		totalRecords = int(count)
 		totalPages = int(math.Ceil(float64(count) / float64(pageSize)))
 	}
@@ -336,7 +336,7 @@ func (r *Result) UpdateOne(doc any) error {
 	gdb := r.dm.gdb
 	r.setFilters(gdb, r.filters)
 	values := r.dm.schema.ParseValue(doc, true)
-	ret := gdb.Limit(1).Updates(values)
+	ret := gdb.Table(r.dm.schema.NativeName).Limit(1).Updates(values)
 	return ret.Error
 }
 
@@ -344,20 +344,20 @@ func (r *Result) UpdateMany(doc any) (int, error) {
 	gdb := r.dm.gdb
 	r.setFilters(gdb, r.filters)
 	values := r.dm.schema.ParseValue(doc, true)
-	ret := gdb.Updates(values)
+	ret := gdb.Table(r.dm.schema.NativeName).Updates(values)
 	return int(ret.RowsAffected), ret.Error
 }
 
 func (r *Result) DeleteOne() error {
 	gdb := r.dm.gdb
 	r.setFilters(gdb, r.filters)
-	ret := gdb.Limit(1).Delete(nil)
+	ret := gdb.Table(r.dm.schema.NativeName).Limit(1).Delete(nil)
 	return ret.Error
 }
 
 func (r *Result) DeleteMany() (int, error) {
 	gdb := r.dm.gdb
 	r.setFilters(gdb, r.filters)
-	ret := gdb.Delete(nil)
+	ret := gdb.Table(r.dm.schema.NativeName).Delete(nil)
 	return int(ret.RowsAffected), ret.Error
 }

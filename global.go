@@ -9,8 +9,8 @@ func Connect(drv Driver, dsn string, name ...string) error {
 	return err
 }
 
-func LookupConnection(name string) *Connection {
-	return DefaultNamespace.LookupConnection(name)
+func Session(name ...string) *Connection {
+	return DefaultNamespace.Session(name...)
 }
 
 func ConnectionNames() []string {
@@ -37,6 +37,10 @@ func Schemas(name ...string) map[string]*Schema {
 	return DefaultNamespace.Schemas(name...)
 }
 
-func GenDDL(schemas map[string]*Schema, dsnName ...string) string {
-	return DefaultNamespace.LookupConnection(dsnName...).GenDDL(schemas)
+func Model(schemaName string) *DataModel {
+	return DefaultNamespace.Model(schemaName)
+}
+
+func ModelBySession(connectionName, schemaName string) *DataModel {
+	return DefaultNamespace.ModelBySession(connectionName, schemaName)
 }
