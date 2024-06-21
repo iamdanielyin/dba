@@ -267,12 +267,12 @@ func (r *Result) orderBy(isDesc bool, names []string) *Result {
 	return r
 }
 
-func (r *Result) getFieldNativeName(key string) string {
+func (r *Result) getFieldNativeName(key string) (*Field, string) {
 	schema := r.dm.schema
 	if field := schema.Fields[key]; field.Valid() {
-		return field.NativeName
+		return &field, field.NativeName
 	}
-	return ""
+	return nil, ""
 }
 
 func (r *Result) setFilters(gdb *gorm.DB, filters []*Filter) *gorm.DB {
@@ -293,7 +293,8 @@ func (r *Result) setFilters(gdb *gorm.DB, filters []*Filter) *gorm.DB {
 				)
 				for _, entry := range entryList {
 					key := entry.Key
-					if nv := r.getFieldNativeName(key); nv != "" {
+					field, nv := r.getFieldNativeName(key)
+					if nv != "" {
 						key = nv
 					}
 					switch entry.Op {
@@ -338,7 +339,12 @@ func (r *Result) setFilters(gdb *gorm.DB, filters []*Filter) *gorm.DB {
 							isExists = true
 						}
 						if isExists {
-							subSQLs = append(subSQLs, fmt.Sprintf("%s IS NOT NULL", key))
+							if field != nil && field.Type == String {
+								subSQLs = append(subSQLs, fmt.Sprintf("%s IS NOT NULL AND %s <> ''", key, key))
+							} else {
+								subSQLs = append(subSQLs, fmt.Sprintf("%s IS NOT NULL", key))
+							}
+
 						} else {
 							subSQLs = append(subSQLs, fmt.Sprintf("%s IS NULL", key))
 						}
@@ -366,7 +372,7 @@ func (r *Result) setOrderBys(gdb *gorm.DB, orderBys map[string]bool) *gorm.DB {
 		return gdb
 	}
 	for key, val := range orderBys {
-		if nv := r.getFieldNativeName(key); nv != "" {
+		if _, nv := r.getFieldNativeName(key); nv != "" {
 			key = nv
 		}
 		if val {
