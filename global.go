@@ -1,11 +1,15 @@
 package dba
 
-func Connect(drv Driver, dsn string, name ...string) error {
-	var n string
-	if len(name) > 0 {
-		n = name[0]
+func Connect(drv Driver, dsn string, config ...*ConnectConfig) error {
+	var c *ConnectConfig
+	if len(config) > 0 && config[0] != nil {
+		c = config[0]
+	} else {
+		c = new(ConnectConfig)
 	}
-	_, err := DefaultNamespace.Connect(n, drv, dsn)
+	c.Driver = drv
+	c.Dsn = dsn
+	_, err := DefaultNamespace.Connect(c)
 	return err
 }
 

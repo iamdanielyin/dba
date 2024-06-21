@@ -7,7 +7,6 @@ import (
 	"github.com/iamdanielyin/structs"
 	"github.com/iancoleman/strcase"
 	"github.com/pkg/errors"
-	"log"
 	"reflect"
 	"strconv"
 	"strings"
@@ -237,7 +236,6 @@ func parseSchema(value any) (*Schema, error) {
 				elemType = elemType.Elem()
 			}
 			elemNewValue = reflect.New(elemType).Interface()
-			log.Println(elemNewValue)
 		}
 
 		if field.IsEmbedded() {

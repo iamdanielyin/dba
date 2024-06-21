@@ -17,11 +17,11 @@ type DataModel struct {
 }
 
 func (dm *DataModel) Create(value any) error {
-	return dm.gdb.Table(dm.schema.NativeName).Create(value).Error
+	return dm.gdb.Create(value).Error
 }
 
 func (dm *DataModel) CreateInBatches(value any, batchSize int) error {
-	return dm.gdb.Table(dm.schema.NativeName).CreateInBatches(value, batchSize).Error
+	return dm.gdb.CreateInBatches(value, batchSize).Error
 }
 
 func (dm *DataModel) parseEntryList(v map[string]any) []*Entry {
@@ -58,9 +58,16 @@ func (dm *DataModel) parseConditions(conditions []any) []*Filter {
 					isPair = false
 					break
 				}
+				op := entryOpEqual
+				if idx := strings.IndexAny(key, " "); idx > 0 {
+					tmp := key
+					key = tmp[0:idx]
+					op = entryOp(tmp[idx+1:])
+				}
 				val := conditions[i+1]
 				entries = append(entries, &Entry{
 					Key:   key,
+					Op:    op,
 					Value: val,
 				})
 			} else {
@@ -100,9 +107,10 @@ func (dm *DataModel) parseConditions(conditions []any) []*Filter {
 				var entries []*Entry
 				for key, val := range ParseStruct(reflectValue.Addr().Interface()) {
 					op := entryOpEqual
-					if i := strings.IndexAny(key, " "); i > 0 {
-						key = key[0:i]
-						op = entryOp(key[i+1:])
+					if idx := strings.IndexAny(key, " "); idx > 0 {
+						tmp := key
+						key = tmp[0:idx]
+						op = entryOp(tmp[idx+1:])
 					}
 					entries = append(entries, &Entry{
 						Key:   key,
@@ -167,111 +175,12 @@ func (r *Result) Or(conditions ...any) *Result {
 	return r
 }
 
-func (r *Result) orderBy(isDesc bool, names []string) *Result {
-	for _, name := range names {
-		name = strings.TrimSpace(name)
-		r.orderBys[name] = isDesc
-	}
-	return r
-}
-
-func (r *Result) OrderByASC(name ...string) *Result {
+func (r *Result) OrderBy(name ...string) *Result {
 	return r.orderBy(false, name)
 }
 
 func (r *Result) OrderByDESC(name ...string) *Result {
 	return r.orderBy(true, name)
-}
-
-func (r *Result) getFieldNativeName(key string) string {
-	schema := r.dm.schema
-	if field := schema.Fields[key]; field.Valid() {
-		return field.NativeName
-	}
-	return ""
-}
-
-func (r *Result) setFilters(gdb *gorm.DB, filters []*Filter) {
-	if _, ok := r.cache.Load("SET_FILTERS"); ok {
-		return
-	}
-	if len(filters) > 0 {
-		for _, item := range filters {
-			switch item.entryType {
-			case entryTypeFilterList:
-				filterList := item.entryList.([]*Filter)
-				r.setFilters(gdb, filterList)
-			case entryTypeEntryList:
-				entryList := item.entryList.([]*Entry)
-				for _, entry := range entryList {
-					key := entry.Key
-					if nv := r.getFieldNativeName(key); nv != "" {
-						key = nv
-					}
-					switch entry.Op {
-					case entryOpEqual:
-						gdb.Where(fmt.Sprintf("%s = ?", key), entry.Value)
-					case entryOpNotEqual:
-						gdb.Where(fmt.Sprintf("%s <> ?", key), entry.Value)
-					case entryOpLike:
-						gdb.Where(fmt.Sprintf("%s LIKE ?", key), "%"+fmt.Sprintf("%v", entry.Value)+"%")
-					case entryOpPrefix:
-						gdb.Where(fmt.Sprintf("%s LIKE ?", key), fmt.Sprintf("%v", entry.Value)+"%")
-					case entryOpSuffix:
-						gdb.Where(fmt.Sprintf("%s LIKE ?", key), "%"+fmt.Sprintf("%v", entry.Value))
-					case entryOpGreaterThan:
-						gdb.Where(fmt.Sprintf("%s > ?", key), entry.Value)
-					case entryOpGreaterThanOrEqual:
-						gdb.Where(fmt.Sprintf("%s >= ?", key), entry.Value)
-					case entryOpLessThan:
-						gdb.Where(fmt.Sprintf("%s < ?", key), entry.Value)
-					case entryOpLessThanOrEqual:
-						gdb.Where(fmt.Sprintf("%s <= ?", key), entry.Value)
-					case entryOpIn:
-						gdb.Where(fmt.Sprintf("%s IN ?", key), entry.Value)
-					case entryOpNotIn:
-						gdb.Where(fmt.Sprintf("%s NOT IN ?", key), entry.Value)
-					case entryOpExists:
-						var isExists bool
-						if v, ok := entry.Value.(bool); ok {
-							isExists = v
-						} else {
-							isExists = true
-						}
-						if isExists {
-							gdb.Where(fmt.Sprintf("%s IS NOT NULL", key))
-						} else {
-							gdb.Where(fmt.Sprintf("%s IS NULL", key))
-						}
-					default:
-						gdb.Where(fmt.Sprintf("%s = ?", key), entry.Value)
-					}
-				}
-			}
-		}
-		r.cache.Store("SET_FILTERS", true)
-	}
-}
-
-func (r *Result) setOrderBys(gdb *gorm.DB, orderBys map[string]bool) {
-	if _, ok := r.cache.Load("SET_ORDER_BYS"); ok {
-		return
-	}
-	for key, val := range orderBys {
-		if nv := r.getFieldNativeName(key); nv != "" {
-			key = nv
-		}
-		if val {
-			gdb.Order(fmt.Sprintf("%s DESC", key))
-		} else {
-			gdb.Order(fmt.Sprintf("%s", key))
-		}
-	}
-	r.cache.Store("SET_ORDER_BYS", true)
-}
-
-func (r *Result) setLimitAndOffset(gdb *gorm.DB, limit, offset int) {
-	gdb.Limit(limit).Offset(offset)
 }
 
 func (r *Result) Limit(limit int) *Result {
@@ -285,38 +194,26 @@ func (r *Result) Offset(offset int) *Result {
 }
 
 func (r *Result) One(dst any) error {
-	gdb := r.dm.gdb
-	r.setFilters(gdb, r.filters)
-	r.setOrderBys(gdb, r.orderBys)
-	r.setLimitAndOffset(gdb, r.limit, r.offset)
-
-	if err := gdb.Table(r.dm.schema.NativeName).First(dst).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	gdb := r.beforeQuery()
+	if err := gdb.First(dst).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
 	return nil
 }
 
 func (r *Result) All(dst any) error {
-	gdb := r.dm.gdb
-	r.setFilters(gdb, r.filters)
-	r.setOrderBys(gdb, r.orderBys)
-	r.setLimitAndOffset(gdb, r.limit, r.offset)
-
-	return gdb.Table(r.dm.schema.NativeName).Find(dst).Error
+	gdb := r.beforeQuery()
+	return gdb.Find(dst).Error
 }
 
 func (r *Result) Count() (int, error) {
-	gdb := r.dm.gdb
-	r.setFilters(gdb, r.filters)
-	r.setOrderBys(gdb, r.orderBys)
-	r.setLimitAndOffset(gdb, r.limit, r.offset)
-
+	gdb := r.beforeQuery()
 	var count int64
-	err := gdb.Table(r.dm.schema.NativeName).Count(&count).Error
+	err := gdb.Count(&count).Error
 	return int(count), err
 }
 
-func (r *Result) FindByPage(pageNum int, pageSize int, dst any) (totalRecords int, totalPages int, err error) {
+func (r *Result) Paginate(pageNum int, pageSize int, dst any) (totalRecords int, totalPages int, err error) {
 	r.offset = (pageNum - 1) * pageSize
 	r.limit = pageSize
 	if err = r.All(dst); err != nil {
@@ -325,7 +222,7 @@ func (r *Result) FindByPage(pageNum int, pageSize int, dst any) (totalRecords in
 
 	gdb := r.dm.gdb
 	var count int64
-	if err = gdb.Table(r.dm.schema.NativeName).Limit(-1).Offset(-1).Count(&count).Error; err == nil {
+	if err = gdb.Limit(-1).Offset(-1).Count(&count).Error; err == nil {
 		totalRecords = int(count)
 		totalPages = int(math.Ceil(float64(count) / float64(pageSize)))
 	}
@@ -336,7 +233,7 @@ func (r *Result) UpdateOne(doc any) error {
 	gdb := r.dm.gdb
 	r.setFilters(gdb, r.filters)
 	values := r.dm.schema.ParseValue(doc, true)
-	ret := gdb.Table(r.dm.schema.NativeName).Limit(1).Updates(values)
+	ret := gdb.Limit(1).Updates(values)
 	return ret.Error
 }
 
@@ -344,20 +241,158 @@ func (r *Result) UpdateMany(doc any) (int, error) {
 	gdb := r.dm.gdb
 	r.setFilters(gdb, r.filters)
 	values := r.dm.schema.ParseValue(doc, true)
-	ret := gdb.Table(r.dm.schema.NativeName).Updates(values)
+	ret := gdb.Updates(values)
 	return int(ret.RowsAffected), ret.Error
 }
 
 func (r *Result) DeleteOne() error {
 	gdb := r.dm.gdb
 	r.setFilters(gdb, r.filters)
-	ret := gdb.Table(r.dm.schema.NativeName).Limit(1).Delete(nil)
+	ret := gdb.Limit(1).Delete(nil)
 	return ret.Error
 }
 
 func (r *Result) DeleteMany() (int, error) {
 	gdb := r.dm.gdb
 	r.setFilters(gdb, r.filters)
-	ret := gdb.Table(r.dm.schema.NativeName).Delete(nil)
+	ret := gdb.Delete(nil)
 	return int(ret.RowsAffected), ret.Error
+}
+
+func (r *Result) orderBy(isDesc bool, names []string) *Result {
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		r.orderBys[name] = isDesc
+	}
+	return r
+}
+
+func (r *Result) getFieldNativeName(key string) string {
+	schema := r.dm.schema
+	if field := schema.Fields[key]; field.Valid() {
+		return field.NativeName
+	}
+	return ""
+}
+
+func (r *Result) setFilters(gdb *gorm.DB, filters []*Filter) *gorm.DB {
+	if _, ok := r.cache.Load("SET_FILTERS"); ok {
+		return gdb
+	}
+	if len(filters) > 0 {
+		for _, filter := range filters {
+			switch filter.entryType {
+			case entryTypeFilterList:
+				filterList := filter.entryList.([]*Filter)
+				gdb = r.setFilters(gdb, filterList)
+			case entryTypeEntryList:
+				entryList := filter.entryList.([]*Entry)
+				var (
+					subSQLs  []string
+					subAttrs []any
+				)
+				for _, entry := range entryList {
+					key := entry.Key
+					if nv := r.getFieldNativeName(key); nv != "" {
+						key = nv
+					}
+					switch entry.Op {
+					case entryOpEqual:
+						subSQLs = append(subSQLs, fmt.Sprintf("%s = ?", key))
+						subAttrs = append(subAttrs, entry.Value)
+					case entryOpNotEqual:
+						subSQLs = append(subSQLs, fmt.Sprintf("%s <> ?", key))
+						subAttrs = append(subAttrs, entry.Value)
+					case entryOpLike:
+						subSQLs = append(subSQLs, fmt.Sprintf("%s LIKE ?", key))
+						subAttrs = append(subAttrs, "%"+fmt.Sprintf("%v", entry.Value)+"%")
+					case entryOpPrefix:
+						subSQLs = append(subSQLs, fmt.Sprintf("%s LIKE ?", key))
+						subAttrs = append(subAttrs, fmt.Sprintf("%v", entry.Value)+"%")
+					case entryOpSuffix:
+						subSQLs = append(subSQLs, fmt.Sprintf("%s LIKE ?", key))
+						subAttrs = append(subAttrs, "%"+fmt.Sprintf("%v", entry.Value))
+					case entryOpGreaterThan:
+						subSQLs = append(subSQLs, fmt.Sprintf("%s > ?", key))
+						subAttrs = append(subAttrs, entry.Value)
+					case entryOpGreaterThanOrEqual:
+						subSQLs = append(subSQLs, fmt.Sprintf("%s >= ?", key))
+						subAttrs = append(subAttrs, entry.Value)
+					case entryOpLessThan:
+						subSQLs = append(subSQLs, fmt.Sprintf("%s < ?", key))
+						subAttrs = append(subAttrs, entry.Value)
+					case entryOpLessThanOrEqual:
+						subSQLs = append(subSQLs, fmt.Sprintf("%s <= ?", key))
+						subAttrs = append(subAttrs, entry.Value)
+					case entryOpIn:
+						subSQLs = append(subSQLs, fmt.Sprintf("%s IN ?", key))
+						subAttrs = append(subAttrs, entry.Value)
+					case entryOpNotIn:
+						subSQLs = append(subSQLs, fmt.Sprintf("%s NOT IN ?", key))
+						subAttrs = append(subAttrs, entry.Value)
+					case entryOpExists:
+						var isExists bool
+						if v, ok := entry.Value.(bool); ok {
+							isExists = v
+						} else {
+							isExists = true
+						}
+						if isExists {
+							subSQLs = append(subSQLs, fmt.Sprintf("%s IS NOT NULL", key))
+						} else {
+							subSQLs = append(subSQLs, fmt.Sprintf("%s IS NULL", key))
+						}
+					default:
+						subSQLs = append(subSQLs, fmt.Sprintf("%s = ?", key))
+						subAttrs = append(subAttrs, entry.Value)
+					}
+				}
+				if len(subSQLs) > 0 {
+					if filter.operator == filterOperatorOr {
+						gdb = gdb.Or(strings.Join(subSQLs, " AND "), subAttrs...)
+					} else {
+						gdb = gdb.Where(strings.Join(subSQLs, " AND "), subAttrs...)
+					}
+				}
+			}
+		}
+		r.cache.Store("SET_FILTERS", true)
+	}
+	return gdb
+}
+
+func (r *Result) setOrderBys(gdb *gorm.DB, orderBys map[string]bool) *gorm.DB {
+	if _, ok := r.cache.Load("SET_ORDER_BYS"); ok {
+		return gdb
+	}
+	for key, val := range orderBys {
+		if nv := r.getFieldNativeName(key); nv != "" {
+			key = nv
+		}
+		if val {
+			gdb = gdb.Order(fmt.Sprintf("%s DESC", key))
+		} else {
+			gdb = gdb.Order(fmt.Sprintf("%s", key))
+		}
+	}
+	r.cache.Store("SET_ORDER_BYS", true)
+	return gdb
+}
+
+func (r *Result) setLimitAndOffset(gdb *gorm.DB, limit, offset int) *gorm.DB {
+	if limit != 0 {
+		gdb = gdb.Limit(limit)
+	}
+	if offset != 0 {
+		gdb = gdb.Offset(offset)
+	}
+	return gdb
+}
+
+func (r *Result) beforeQuery() *gorm.DB {
+	gdb := r.dm.gdb
+	gdb = r.setFilters(gdb, r.filters)
+	gdb = r.setOrderBys(gdb, r.orderBys)
+	gdb = r.setLimitAndOffset(gdb, r.limit, r.offset)
+	return gdb
 }

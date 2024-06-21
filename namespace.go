@@ -6,7 +6,12 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+	"gorm.io/gorm/schema"
+	"log"
+	"os"
 	"sync"
+	"time"
 )
 
 type Namespace struct {
@@ -15,36 +20,69 @@ type Namespace struct {
 	schemas     *sync.Map
 }
 
-func (ns *Namespace) Connect(name string, drv Driver, dsn string) (*Connection, error) {
+type ConnectConfig struct {
+	Name        string
+	Driver      Driver
+	Dsn         string
+	ShowSQL     bool
+	TablePrefix string
+}
+
+func (ns *Namespace) Connect(config *ConnectConfig) (*Connection, error) {
 	var dial gorm.Dialector
-	switch drv {
+	switch config.Driver {
 	case MYSQL:
-		dial = mysql.Open(dsn)
+		dial = mysql.Open(config.Dsn)
 	case SQLITE:
-		dial = sqlite.Open(dsn)
+		dial = sqlite.Open(config.Dsn)
 	default:
-		return nil, errors.Errorf("dba: invalid driver: %s", drv)
+		return nil, errors.Errorf("dba: invalid driver: %s", config.Driver)
 	}
-	gdb, err := gorm.Open(dial)
+	gConf := gorm.Config{
+		Logger: logger.New(log.New(os.Stdout, "\r\n", log.LstdFlags), logger.Config{
+			SlowThreshold:             200 * time.Millisecond,
+			LogLevel:                  logger.Warn,
+			IgnoreRecordNotFoundError: false,
+			Colorful:                  true,
+		}),
+		DisableForeignKeyConstraintWhenMigrating: true,
+		NamingStrategy: schema.NamingStrategy{
+			TablePrefix: "",
+		},
+	}
+	if config.ShowSQL {
+		gConf.Logger = logger.New(log.New(os.Stdout, "\r\n", log.LstdFlags), logger.Config{
+			SlowThreshold:             200 * time.Millisecond,
+			LogLevel:                  logger.Info,
+			IgnoreRecordNotFoundError: false,
+			Colorful:                  true,
+		})
+	}
+	if config.TablePrefix != "" {
+		gConf.NamingStrategy = schema.NamingStrategy{
+			TablePrefix: config.TablePrefix,
+		}
+	}
+	gdb, err := gorm.Open(dial, &gConf)
 	if err != nil {
 		return nil, errors.Wrap(err, "dba: connect failed")
 	}
-	if name == "" {
+	if config.Name == "" {
 		count := 0
 		ns.connections.Range(func(key, value interface{}) bool {
 			count++
 			return true
 		})
-		name = fmt.Sprintf("%d", count)
+		config.Name = fmt.Sprintf("%d", count)
 	}
 	conn := &Connection{
 		ns:     ns,
-		driver: drv,
-		dsn:    dsn,
-		name:   name,
+		driver: config.Driver,
+		dsn:    config.Dsn,
+		name:   config.Name,
 		gdb:    gdb,
 	}
-	ns.connections.Store(name, conn)
+	ns.connections.Store(config.Name, conn)
 	return conn, nil
 }
 
@@ -169,16 +207,16 @@ func (ns *Namespace) ModelBySession(connectionName, schemaName string) *DataMode
 		panic(fmt.Errorf("connection not exists: %s", connectionName))
 	}
 
-	schema := ns.LookupSchema(schemaName)
-	if schema == nil {
+	s := ns.LookupSchema(schemaName)
+	if s == nil {
 		panic(fmt.Errorf("schema not exists: %s", schemaName))
 	}
 
 	gdb := conn.NewDB()
-	gdb.Table(schema.NativeName)
+	gdb = gdb.Table(s.NativeName)
 	return &DataModel{
 		conn:   conn,
-		schema: schema,
+		schema: s,
 		gdb:    gdb,
 	}
 }

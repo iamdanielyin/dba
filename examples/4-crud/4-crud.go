@@ -8,7 +8,9 @@ import (
 )
 
 func main() {
-	if err := dba.Connect(dba.SQLITE, "./test.db"); err != nil {
+	if err := dba.Connect(dba.SQLITE, "./test.db", &dba.ConnectConfig{
+		ShowSQL: true,
+	}); err != nil {
 		log.Fatal(err)
 	}
 
@@ -28,7 +30,7 @@ func main() {
 		log.Fatal(err)
 	}
 	var list []*examples.Permission
-	if err := Permission.Find().All(&list); err != nil {
+	if err := Permission.Find("ID >", 16).And("Code LIKE ?", "2024%").All(&list); err != nil {
 		log.Fatal(err)
 	}
 	log.Println(list)
