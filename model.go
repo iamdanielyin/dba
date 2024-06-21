@@ -58,12 +58,8 @@ func (dm *DataModel) parseConditions(conditions []any) []*Filter {
 					isPair = false
 					break
 				}
-				op := entryOpEqual
-				if idx := strings.IndexAny(key, " "); idx > 0 {
-					tmp := key
-					key = tmp[0:idx]
-					op = entryOp(tmp[idx+1:])
-				}
+				var op entryOp
+				key, op = parseEntryOp(key)
 				val := conditions[i+1]
 				entries = append(entries, &Entry{
 					Key:   key,
@@ -106,12 +102,8 @@ func (dm *DataModel) parseConditions(conditions []any) []*Filter {
 			if reflectValue.Kind() == reflect.Struct {
 				var entries []*Entry
 				for key, val := range ParseStruct(reflectValue.Addr().Interface()) {
-					op := entryOpEqual
-					if idx := strings.IndexAny(key, " "); idx > 0 {
-						tmp := key
-						key = tmp[0:idx]
-						op = entryOp(tmp[idx+1:])
-					}
+					var op entryOp
+					key, op = parseEntryOp(key)
 					entries = append(entries, &Entry{
 						Key:   key,
 						Op:    op,

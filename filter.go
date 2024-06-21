@@ -1,5 +1,7 @@
 package dba
 
+import "strings"
+
 type Filter struct {
 	operator  filterOperator
 	entryType entryListType
@@ -25,16 +27,16 @@ type entryOp string
 const (
 	entryOpEqual              entryOp = "="
 	entryOpNotEqual           entryOp = "!="
-	entryOpLike               entryOp = "LIKE"
-	entryOpPrefix             entryOp = "PREF"
-	entryOpSuffix             entryOp = "SUFF"
+	entryOpLike               entryOp = "$LIKE"
+	entryOpPrefix             entryOp = "$PREFIX"
+	entryOpSuffix             entryOp = "$SUFFIX"
 	entryOpGreaterThan        entryOp = ">"
 	entryOpGreaterThanOrEqual entryOp = ">="
 	entryOpLessThan           entryOp = "<"
 	entryOpLessThanOrEqual    entryOp = "<="
-	entryOpIn                 entryOp = "IN"
-	entryOpNotIn              entryOp = "NIN"
-	entryOpExists             entryOp = "EXISTS"
+	entryOpIn                 entryOp = "$IN"
+	entryOpNotIn              entryOp = "$NIN"
+	entryOpExists             entryOp = "$EXISTS"
 )
 
 type Entry struct {
@@ -44,3 +46,16 @@ type Entry struct {
 }
 
 type Cond map[string]any
+
+func parseEntryOp(rawKey string) (key string, op entryOp) {
+	rawKey = strings.TrimSpace(rawKey)
+	op = entryOpEqual
+	if idx := strings.IndexAny(rawKey, " "); idx > 0 {
+		tmp := key
+		key = tmp[0:idx]
+		op = entryOp(strings.ToUpper(tmp[idx+1:]))
+	} else {
+		key = rawKey
+	}
+	return
+}

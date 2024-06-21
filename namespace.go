@@ -7,7 +7,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"gorm.io/gorm/schema"
+	gschema "gorm.io/gorm/schema"
 	"log"
 	"os"
 	"sync"
@@ -46,7 +46,7 @@ func (ns *Namespace) Connect(config *ConnectConfig) (*Connection, error) {
 			Colorful:                  true,
 		}),
 		DisableForeignKeyConstraintWhenMigrating: true,
-		NamingStrategy: schema.NamingStrategy{
+		NamingStrategy: gschema.NamingStrategy{
 			TablePrefix: "",
 		},
 	}
@@ -59,7 +59,7 @@ func (ns *Namespace) Connect(config *ConnectConfig) (*Connection, error) {
 		})
 	}
 	if config.TablePrefix != "" {
-		gConf.NamingStrategy = schema.NamingStrategy{
+		gConf.NamingStrategy = gschema.NamingStrategy{
 			TablePrefix: config.TablePrefix,
 		}
 	}
@@ -158,11 +158,11 @@ func (ns *Namespace) Schemas(names ...string) map[string]*Schema {
 
 func (ns *Namespace) RepairRelationships() {
 	schemas := ns.Schemas()
-	for schemaName, schema := range schemas {
+	for schemaName, s := range schemas {
 		var needUpdate bool
-		for fieldName, field := range schema.Fields {
+		for fieldName, field := range s.Fields {
 			if field.RelConfig != "" {
-				rel := parseRel(field.RelConfig, schema, &field, schemas)
+				rel := parseRel(field.RelConfig, s, &field, schemas)
 				if rel != nil {
 					needUpdate = true
 					field.Relationship = *rel
@@ -172,12 +172,12 @@ func (ns *Namespace) RepairRelationships() {
 						field.ItemType = ""
 					}
 				}
-				schema.Fields[fieldName] = field
+				s.Fields[fieldName] = field
 
 			}
 		}
 		if needUpdate {
-			ns.schemas.Store(schemaName, schema)
+			ns.schemas.Store(schemaName, s)
 		}
 	}
 }
