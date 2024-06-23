@@ -30,7 +30,7 @@ func main() {
 		log.Fatal(err)
 	}
 	var list []*examples.Permission
-	if err := Permission.Find("ID >", 16).Or("Code $PREFIX", "2024").All(&list); err != nil {
+	if err := Permission.Find().Or("ID >", 16, "Code $PREFIX", "2023").All(&list); err != nil {
 		log.Fatal(err)
 	}
 	log.Println(list)

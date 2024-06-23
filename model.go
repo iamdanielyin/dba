@@ -39,7 +39,13 @@ func (dm *DataModel) parseEntryList(v map[string]any) []*Entry {
 	return entries
 }
 
-func (dm *DataModel) parseConditions(conditions []any) []*Filter {
+func (dm *DataModel) parseConditions(operator filterOperator, conditions []any) []*Filter {
+	if len(conditions) == 0 {
+		return nil
+	}
+	if operator == "" {
+		operator = filterOperatorAnd
+	}
 	// 支持以下几种传参模式
 	// 1、dba.Cond
 	// 2、key1=value1、key1=value1&key2=value2
@@ -73,7 +79,7 @@ func (dm *DataModel) parseConditions(conditions []any) []*Filter {
 		if isPair {
 			return []*Filter{
 				{
-					operator:  filterOperatorAnd,
+					operator:  operator,
 					entryType: entryTypeEntryList,
 					entryList: entries,
 				},
@@ -86,14 +92,14 @@ func (dm *DataModel) parseConditions(conditions []any) []*Filter {
 		case Cond:
 			// Cond
 			filters = append(filters, &Filter{
-				operator:  filterOperatorAnd,
+				operator:  operator,
 				entryType: entryTypeEntryList,
 				entryList: dm.parseEntryList(v),
 			})
 		case map[string]any:
 			// map
 			filters = append(filters, &Filter{
-				operator:  filterOperatorAnd,
+				operator:  operator,
 				entryType: entryTypeEntryList,
 				entryList: dm.parseEntryList(v),
 			})
@@ -111,7 +117,7 @@ func (dm *DataModel) parseConditions(conditions []any) []*Filter {
 					})
 				}
 				filters = append(filters, &Filter{
-					operator:  filterOperatorAnd,
+					operator:  operator,
 					entryType: entryTypeEntryList,
 					entryList: entries,
 				})
@@ -127,9 +133,10 @@ func (dm *DataModel) Find(conditions ...any) *Result {
 		orderBys: make(map[string]bool),
 		cache:    new(sync.Map),
 	}
-	filters := dm.parseConditions(conditions)
-	if len(filters) > 0 {
-		res.filters = filters
+	if len(conditions) > 0 {
+		if filters := dm.parseConditions(filterOperatorAnd, conditions); len(filters) > 0 {
+			res.filters = filters
+		}
 	}
 	return res
 }
@@ -144,25 +151,17 @@ type Result struct {
 }
 
 func (r *Result) And(conditions ...any) *Result {
-	filters := r.dm.parseConditions(conditions)
+	filters := r.dm.parseConditions(filterOperatorAnd, conditions)
 	if len(filters) > 0 {
-		r.filters = append(r.filters, &Filter{
-			operator:  filterOperatorAnd,
-			entryType: entryTypeFilterList,
-			entryList: filters,
-		})
+		r.filters = append(r.filters, filters...)
 	}
 	return r
 }
 
 func (r *Result) Or(conditions ...any) *Result {
-	filters := r.dm.parseConditions(conditions)
+	filters := r.dm.parseConditions(filterOperatorOr, conditions)
 	if len(filters) > 0 {
-		r.filters = append(r.filters, &Filter{
-			operator:  filterOperatorOr,
-			entryType: entryTypeFilterList,
-			entryList: filters,
-		})
+		r.filters = append(r.filters, filters...)
 	}
 	return r
 }
@@ -271,91 +270,119 @@ func (r *Result) setFilters(gdb *gorm.DB, filters []*Filter) *gorm.DB {
 	if _, ok := r.cache.Load("SET_FILTERS"); ok {
 		return gdb
 	}
+
 	if len(filters) > 0 {
-		for _, filter := range filters {
-			switch filter.entryType {
-			case entryTypeFilterList:
-				filterList := filter.entryList.([]*Filter)
-				gdb = r.setFilters(gdb, filterList)
-			case entryTypeEntryList:
-				entryList := filter.entryList.([]*Entry)
+		var setItem func(filterOperator, []*Filter) (string, []any)
+		setItem = func(sfo filterOperator, sfs []*Filter) (string, []any) {
+			var (
+				sqls  []string
+				attrs []any
+			)
+			for _, item := range sfs {
+				if item == nil {
+					continue
+				}
 				var (
 					subSQLs  []string
 					subAttrs []any
 				)
-				for _, entry := range entryList {
-					key := entry.Key
-					field, nv := r.getFieldNativeName(key)
-					if nv != "" {
-						key = nv
+				switch item.entryType {
+				case entryTypeFilterList:
+					subFilterList := item.entryList.([]*Filter)
+					if s, a := setItem(item.operator, subFilterList); s != "" {
+						subSQLs = append(subSQLs, s)
+						subAttrs = append(subAttrs, a...)
 					}
-					switch entry.Op {
-					case entryOpEqual:
-						subSQLs = append(subSQLs, fmt.Sprintf("%s = ?", key))
-						subAttrs = append(subAttrs, entry.Value)
-					case entryOpNotEqual:
-						subSQLs = append(subSQLs, fmt.Sprintf("%s <> ?", key))
-						subAttrs = append(subAttrs, entry.Value)
-					case entryOpLike:
-						subSQLs = append(subSQLs, fmt.Sprintf("%s LIKE ?", key))
-						subAttrs = append(subAttrs, "%"+fmt.Sprintf("%v", entry.Value)+"%")
-					case entryOpPrefix:
-						subSQLs = append(subSQLs, fmt.Sprintf("%s LIKE ?", key))
-						subAttrs = append(subAttrs, fmt.Sprintf("%v", entry.Value)+"%")
-					case entryOpSuffix:
-						subSQLs = append(subSQLs, fmt.Sprintf("%s LIKE ?", key))
-						subAttrs = append(subAttrs, "%"+fmt.Sprintf("%v", entry.Value))
-					case entryOpGreaterThan:
-						subSQLs = append(subSQLs, fmt.Sprintf("%s > ?", key))
-						subAttrs = append(subAttrs, entry.Value)
-					case entryOpGreaterThanOrEqual:
-						subSQLs = append(subSQLs, fmt.Sprintf("%s >= ?", key))
-						subAttrs = append(subAttrs, entry.Value)
-					case entryOpLessThan:
-						subSQLs = append(subSQLs, fmt.Sprintf("%s < ?", key))
-						subAttrs = append(subAttrs, entry.Value)
-					case entryOpLessThanOrEqual:
-						subSQLs = append(subSQLs, fmt.Sprintf("%s <= ?", key))
-						subAttrs = append(subAttrs, entry.Value)
-					case entryOpIn:
-						subSQLs = append(subSQLs, fmt.Sprintf("%s IN ?", key))
-						subAttrs = append(subAttrs, entry.Value)
-					case entryOpNotIn:
-						subSQLs = append(subSQLs, fmt.Sprintf("%s NOT IN ?", key))
-						subAttrs = append(subAttrs, entry.Value)
-					case entryOpExists:
-						var isExists bool
-						if v, ok := entry.Value.(bool); ok {
-							isExists = v
-						} else {
-							isExists = true
+				case entryTypeEntryList:
+					entryList := item.entryList.([]*Entry)
+					for _, entry := range entryList {
+						key := entry.Key
+						field, nv := r.getFieldNativeName(key)
+						if nv != "" {
+							key = nv
 						}
-						if isExists {
-							if field != nil && field.Type == String {
-								subSQLs = append(subSQLs, fmt.Sprintf("%s IS NOT NULL AND %s <> ''", key, key))
+						switch entry.Op {
+						case entryOpEqual:
+							subSQLs = append(subSQLs, fmt.Sprintf("(%s = ?)", key))
+							subAttrs = append(subAttrs, entry.Value)
+						case entryOpNotEqual:
+							subSQLs = append(subSQLs, fmt.Sprintf("(%s <> ?)", key))
+							subAttrs = append(subAttrs, entry.Value)
+						case entryOpLike:
+							subSQLs = append(subSQLs, fmt.Sprintf("(%s LIKE ?)", key))
+							subAttrs = append(subAttrs, "%"+fmt.Sprintf("%v", entry.Value)+"%")
+						case entryOpPrefix:
+							subSQLs = append(subSQLs, fmt.Sprintf("(%s LIKE ?)", key))
+							subAttrs = append(subAttrs, fmt.Sprintf("%v", entry.Value)+"%")
+						case entryOpSuffix:
+							subSQLs = append(subSQLs, fmt.Sprintf("(%s LIKE ?)", key))
+							subAttrs = append(subAttrs, "%"+fmt.Sprintf("%v", entry.Value))
+						case entryOpGreaterThan:
+							subSQLs = append(subSQLs, fmt.Sprintf("(%s > ?)", key))
+							subAttrs = append(subAttrs, entry.Value)
+						case entryOpGreaterThanOrEqual:
+							subSQLs = append(subSQLs, fmt.Sprintf("(%s >= ?)", key))
+							subAttrs = append(subAttrs, entry.Value)
+						case entryOpLessThan:
+							subSQLs = append(subSQLs, fmt.Sprintf("(%s < ?)", key))
+							subAttrs = append(subAttrs, entry.Value)
+						case entryOpLessThanOrEqual:
+							subSQLs = append(subSQLs, fmt.Sprintf("(%s <= ?)", key))
+							subAttrs = append(subAttrs, entry.Value)
+						case entryOpIn:
+							subSQLs = append(subSQLs, fmt.Sprintf("(%s IN ?)", key))
+							subAttrs = append(subAttrs, entry.Value)
+						case entryOpNotIn:
+							subSQLs = append(subSQLs, fmt.Sprintf("(%s NOT IN ?)", key))
+							subAttrs = append(subAttrs, entry.Value)
+						case entryOpExists:
+							var isExists bool
+							if v, ok := entry.Value.(bool); ok {
+								isExists = v
 							} else {
-								subSQLs = append(subSQLs, fmt.Sprintf("%s IS NOT NULL", key))
+								isExists = true
 							}
+							if isExists {
+								if field != nil && field.Type == String {
+									subSQLs = append(subSQLs, fmt.Sprintf("(%s IS NOT NULL AND %s <> '')", key, key))
+								} else {
+									subSQLs = append(subSQLs, fmt.Sprintf("(%s IS NOT NULL)", key))
+								}
 
-						} else {
-							subSQLs = append(subSQLs, fmt.Sprintf("%s IS NULL", key))
+							} else {
+								subSQLs = append(subSQLs, fmt.Sprintf("(%s IS NULL)", key))
+							}
+						default:
+							subSQLs = append(subSQLs, fmt.Sprintf("(%s = ?)", key))
+							subAttrs = append(subAttrs, entry.Value)
 						}
-					default:
-						subSQLs = append(subSQLs, fmt.Sprintf("%s = ?", key))
-						subAttrs = append(subAttrs, entry.Value)
 					}
 				}
 				if len(subSQLs) > 0 {
-					if filter.operator == filterOperatorOr {
-						gdb = gdb.Or(strings.Join(subSQLs, " AND "), subAttrs...)
+					if item.operator == filterOperatorOr {
+						s := fmt.Sprintf("(%s)", strings.Join(subSQLs, " OR "))
+						sqls = append(sqls, s)
 					} else {
-						gdb = gdb.Where(strings.Join(subSQLs, " AND "), subAttrs...)
+						s := fmt.Sprintf("(%s)", strings.Join(subSQLs, " AND "))
+						sqls = append(sqls, s)
+					}
+					if len(subAttrs) > 0 {
+						attrs = append(attrs, subAttrs...)
 					}
 				}
 			}
+			if sfo == filterOperatorOr {
+				s := fmt.Sprintf("(%s)", strings.Join(sqls, " OR "))
+				return s, attrs
+			} else {
+				s := fmt.Sprintf("(%s)", strings.Join(sqls, " AND "))
+				return s, attrs
+			}
 		}
-		r.cache.Store("SET_FILTERS", true)
+		query, attrs := setItem(filterOperatorAnd, filters)
+		gdb = gdb.Where(query, attrs...)
 	}
+	r.cache.Store("SET_FILTERS", true)
 	return gdb
 }
 

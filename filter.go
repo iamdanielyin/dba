@@ -51,7 +51,7 @@ func parseEntryOp(rawKey string) (key string, op entryOp) {
 	rawKey = strings.TrimSpace(rawKey)
 	op = entryOpEqual
 	if idx := strings.IndexAny(rawKey, " "); idx > 0 {
-		tmp := key
+		tmp := rawKey
 		key = tmp[0:idx]
 		op = entryOp(strings.ToUpper(tmp[idx+1:]))
 	} else {
