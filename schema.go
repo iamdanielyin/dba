@@ -54,15 +54,19 @@ type SchemaInterface interface {
 type Schema struct {
 	cache *sync.Map
 
-	Name        string           `json:"name,omitempty"`
-	NativeName  string           `json:"native_name,omitempty"`
-	Description string           `json:"description,omitempty"`
-	Fields      map[string]Field `json:"fields,omitempty"`
+	Name        string            `json:"name,omitempty"`
+	NativeName  string            `json:"native_name,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Fields      map[string]*Field `json:"fields,omitempty"`
 }
 
 func (s *Schema) Clone() *Schema {
 	copied := new(Schema)
 	*copied = *s
+	copied.Fields = make(map[string]*Field)
+	for _, f := range s.Fields {
+		copied.Fields[f.Name] = f.Clone()
+	}
 	return copied
 }
 
@@ -108,7 +112,7 @@ func (s *Schema) PrimaryKeys() []*Field {
 	var pks []*Field
 	for _, field := range s.Fields {
 		if field.IsPrimary {
-			pks = append(pks, &field)
+			pks = append(pks, field)
 		}
 	}
 	s.Cache().Store("PRIMARY_KEYS", pks)
@@ -125,18 +129,18 @@ func (s *Schema) PrimaryKey() *Field {
 }
 
 type Field struct {
-	Name            string       `json:"name,omitempty"`
-	NativeName      string       `json:"native_name,omitempty"`
-	Type            SchemaType   `json:"type,omitempty"`
-	ItemType        string       `json:"item_type,omitempty"`
-	NativeType      string       `json:"native_type,omitempty"`
-	Title           string       `json:"title,omitempty"`
-	Description     null.String  `json:"description,omitempty"`
-	Relationship    Relationship `json:"relationship,omitempty"`
-	RelConfig       string       `json:"rel_config,omitempty"`
-	IsPrimary       bool         `json:"is_primary"`
-	IsUnsigned      bool         `json:"is_unsigned"`
-	IsAutoIncrement bool         `json:"is_auto_increment"`
+	Name            string        `json:"name,omitempty"`
+	NativeName      string        `json:"native_name,omitempty"`
+	Type            SchemaType    `json:"type,omitempty"`
+	ItemType        string        `json:"item_type,omitempty"`
+	NativeType      string        `json:"native_type,omitempty"`
+	Title           string        `json:"title,omitempty"`
+	Description     null.String   `json:"description,omitempty"`
+	Relationship    *Relationship `json:"relationship,omitempty"`
+	RelConfig       string        `json:"rel_config,omitempty"`
+	IsPrimary       bool          `json:"is_primary"`
+	IsUnsigned      bool          `json:"is_unsigned"`
+	IsAutoIncrement bool          `json:"is_auto_increment"`
 
 	// TODO 默认值配置实现
 	//DefaultConfig  string
@@ -155,6 +159,13 @@ func (f *Field) Valid() bool {
 	return f.Type != ""
 }
 
+func (f *Field) Clone() *Field {
+	copied := new(Field)
+	*copied = *f
+	copied.Relationship = f.Relationship.Clone()
+	return copied
+}
+
 type Relationship struct {
 	Kind           SchemaRelationship `json:"kind,omitempty"`
 	SrcSchemaName  string             `json:"src_schema_name,omitempty"`
@@ -168,8 +179,17 @@ type Relationship struct {
 	BrgIsNative       bool   `json:"brg_is_native,omitempty"`
 }
 
-func (rs Relationship) Valid() bool {
-	return rs.Kind != ""
+func (rs *Relationship) Valid() bool {
+	return rs != nil && rs.Kind != ""
+}
+
+func (rs *Relationship) Clone() *Relationship {
+	if rs == nil {
+		return nil
+	}
+	copied := new(Relationship)
+	*copied = *rs
+	return copied
 }
 
 func ParseSchemas(values ...any) ([]*Schema, error) {
@@ -209,7 +229,7 @@ func parseSchema(value any) (*Schema, error) {
 	schema := Schema{
 		Name:       structName,
 		NativeName: strcase.ToSnake(structName),
-		Fields:     make(map[string]Field),
+		Fields:     make(map[string]*Field),
 	}
 	if si, ok := value.(SchemaInterface); ok {
 		d := si.Schema()
@@ -251,7 +271,7 @@ func parseSchema(value any) (*Schema, error) {
 			}
 			continue
 		}
-		p := Field{
+		p := &Field{
 			Name:        fieldName,
 			NativeName:  strcase.ToSnake(fieldName),
 			IsRequired:  true,
@@ -278,7 +298,7 @@ func parseSchema(value any) (*Schema, error) {
 			case "incr":
 				p.IsAutoIncrement = true
 			case "rel":
-				p.Relationship = Relationship{}
+				p.Relationship = new(Relationship)
 				p.RelConfig = v
 				if fieldReflectType.Kind() == reflect.Array || fieldReflectType.Kind() == reflect.Slice {
 					p.Relationship.DstSchemaName = elemType.Name()
@@ -288,7 +308,7 @@ func parseSchema(value any) (*Schema, error) {
 				}
 			}
 		}
-		parseFieldType(fieldNewValue, fieldKind, &p)
+		parseFieldType(fieldNewValue, fieldKind, p)
 		if elemType != nil {
 			p.Type = Array
 			if p.ItemType == "" {

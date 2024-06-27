@@ -142,12 +142,14 @@ func (dm *DataModel) Find(conditions ...any) *Result {
 }
 
 type Result struct {
-	dm       *DataModel
-	filters  []*Filter
-	orderBys map[string]bool
-	limit    int
-	offset   int
-	cache    *sync.Map
+	dm           *DataModel
+	filters      []*Filter
+	orderBys     map[string]bool
+	fields       []string
+	isOmitFields bool
+	limit        int
+	offset       int
+	cache        *sync.Map
 }
 
 func (r *Result) And(conditions ...any) *Result {
@@ -181,6 +183,12 @@ func (r *Result) Limit(limit int) *Result {
 
 func (r *Result) Offset(offset int) *Result {
 	r.offset = offset
+	return r
+}
+
+func (r *Result) Fields(names []string, isOmit ...bool) *Result {
+	r.fields = names
+	r.isOmitFields = len(isOmit) > 0 && isOmit[0]
 	return r
 }
 
@@ -236,8 +244,7 @@ func (r *Result) Update(doc any) (int, error) {
 	// FINAL
 	defer r.reset()
 
-	gdb := r.dm.gdb
-	r.setFilters(gdb, r.filters)
+	gdb := r.beforeQuery()
 	values := r.dm.schema.ParseValue(doc, true)
 	ret := gdb.Updates(values)
 	return int(ret.RowsAffected), ret.Error
@@ -247,8 +254,7 @@ func (r *Result) Delete() (int, error) {
 	// FINAL
 	defer r.reset()
 
-	gdb := r.dm.gdb
-	r.setFilters(gdb, r.filters)
+	gdb := r.beforeQuery()
 	ret := gdb.Delete(nil)
 	return int(ret.RowsAffected), ret.Error
 }
@@ -264,7 +270,7 @@ func (r *Result) orderBy(isDesc bool, names []string) *Result {
 func (r *Result) getFieldNativeName(key string) (*Field, string) {
 	schema := r.dm.schema
 	if field := schema.Fields[key]; field.Valid() {
-		return &field, field.NativeName
+		return field, field.NativeName
 	}
 	return nil, ""
 }
@@ -422,6 +428,13 @@ func (r *Result) beforeQuery() *gorm.DB {
 	gdb = r.setFilters(gdb, r.filters)
 	gdb = r.setOrderBys(gdb, r.orderBys)
 	gdb = r.setLimitAndOffset(gdb, r.limit, r.offset)
+	if len(r.fields) > 0 {
+		if r.isOmitFields {
+			gdb = gdb.Omit(r.fields...)
+		} else {
+			gdb = gdb.Select(r.fields)
+		}
+	}
 	return gdb
 }
 

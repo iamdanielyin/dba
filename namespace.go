@@ -162,10 +162,10 @@ func (ns *Namespace) RepairRelationships() {
 		var needUpdate bool
 		for fieldName, field := range s.Fields {
 			if field.RelConfig != "" {
-				rel := parseRel(field.RelConfig, s, &field, schemas)
+				rel := parseRel(field.RelConfig, s, field, schemas)
 				if rel != nil {
 					needUpdate = true
-					field.Relationship = *rel
+					field.Relationship = rel
 				}
 				if field.ItemType != "" {
 					if !allBasicTypeMap[SchemaType(field.ItemType)] && schemas[field.ItemType] == nil {
