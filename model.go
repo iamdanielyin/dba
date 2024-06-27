@@ -185,6 +185,9 @@ func (r *Result) Offset(offset int) *Result {
 }
 
 func (r *Result) One(dst any) error {
+	// FINAL
+	defer r.reset()
+
 	gdb := r.beforeQuery()
 	if err := gdb.First(dst).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
@@ -193,11 +196,17 @@ func (r *Result) One(dst any) error {
 }
 
 func (r *Result) All(dst any) error {
+	// FINAL
+	defer r.reset()
+
 	gdb := r.beforeQuery()
 	return gdb.Find(dst).Error
 }
 
 func (r *Result) Count() (int, error) {
+	// FINAL
+	defer r.reset()
+
 	gdb := r.beforeQuery()
 	var count int64
 	err := gdb.Count(&count).Error
@@ -205,6 +214,9 @@ func (r *Result) Count() (int, error) {
 }
 
 func (r *Result) Paginate(pageNum int, pageSize int, dst any) (totalRecords int, totalPages int, err error) {
+	// FINAL
+	defer r.reset()
+
 	r.offset = (pageNum - 1) * pageSize
 	r.limit = pageSize
 	if err = r.All(dst); err != nil {
@@ -220,15 +232,10 @@ func (r *Result) Paginate(pageNum int, pageSize int, dst any) (totalRecords int,
 	return
 }
 
-func (r *Result) UpdateOne(doc any) error {
-	gdb := r.dm.gdb
-	r.setFilters(gdb, r.filters)
-	values := r.dm.schema.ParseValue(doc, true)
-	ret := gdb.Limit(1).Updates(values)
-	return ret.Error
-}
+func (r *Result) Update(doc any) (int, error) {
+	// FINAL
+	defer r.reset()
 
-func (r *Result) UpdateMany(doc any) (int, error) {
 	gdb := r.dm.gdb
 	r.setFilters(gdb, r.filters)
 	values := r.dm.schema.ParseValue(doc, true)
@@ -236,14 +243,10 @@ func (r *Result) UpdateMany(doc any) (int, error) {
 	return int(ret.RowsAffected), ret.Error
 }
 
-func (r *Result) DeleteOne() error {
-	gdb := r.dm.gdb
-	r.setFilters(gdb, r.filters)
-	ret := gdb.Limit(1).Delete(nil)
-	return ret.Error
-}
+func (r *Result) Delete() (int, error) {
+	// FINAL
+	defer r.reset()
 
-func (r *Result) DeleteMany() (int, error) {
 	gdb := r.dm.gdb
 	r.setFilters(gdb, r.filters)
 	ret := gdb.Delete(nil)
@@ -420,4 +423,15 @@ func (r *Result) beforeQuery() *gorm.DB {
 	gdb = r.setOrderBys(gdb, r.orderBys)
 	gdb = r.setLimitAndOffset(gdb, r.limit, r.offset)
 	return gdb
+}
+
+func (r *Result) reset() {
+	gdb := r.dm.conn.NewDB()
+	gdb = gdb.Table(r.dm.schema.NativeName)
+	r.dm.gdb = gdb
+	r.filters = nil
+	r.orderBys = make(map[string]bool)
+	r.limit = 0
+	r.offset = 0
+	r.cache = new(sync.Map)
 }

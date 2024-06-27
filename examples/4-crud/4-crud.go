@@ -23,15 +23,30 @@ func main() {
 	}
 
 	Permission := dba.Model("Permission")
+
+	// create
 	if err = Permission.Create(&examples.Permission{
 		Code: time.Now().Format(time.DateTime),
 		Name: "Hello " + time.Now().Format(time.DateTime),
 	}); err != nil {
 		log.Fatal(err)
 	}
+
+	// query
 	var list []*examples.Permission
 	if err := Permission.Find().Or("ID >", 16, "Code $PREFIX", "2023").All(&list); err != nil {
 		log.Fatal(err)
 	}
-	log.Println(list)
+
+	// update
+	if _, err := Permission.Find("ID >", 16).Update(&examples.Permission{
+		Code: "UPDATED",
+	}); err != nil {
+		log.Fatal(err)
+	}
+
+	// delete
+	if _, err := Permission.Find("ID =", list[0].ID).Delete(); err != nil {
+		log.Fatal(err)
+	}
 }

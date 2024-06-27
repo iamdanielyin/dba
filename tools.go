@@ -493,6 +493,10 @@ func parseStruct(value reflect.Value, result map[string]any) {
 			continue
 		}
 
+		if fieldValue.IsZero() {
+			continue
+		}
+
 		if fieldValue.Kind() == reflect.Struct {
 			nestedResult := make(map[string]any)
 			parseStruct(fieldValue, nestedResult)
