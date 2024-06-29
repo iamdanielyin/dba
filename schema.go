@@ -20,15 +20,15 @@ type SchemaType string
 
 const (
 	String  SchemaType = "string"
-	Integer SchemaType = "integer"
+	Integer SchemaType = "int"
 	Float   SchemaType = "float"
-	Boolean SchemaType = "boolean"
+	Boolean SchemaType = "bool"
 	Time    SchemaType = "time"
 	Object  SchemaType = "object"
 	Array   SchemaType = "array"
 )
 
-var allBasicTypeMap = map[SchemaType]bool{
+var scalarTypeMap = map[SchemaType]bool{
 	String:  true,
 	Integer: true,
 	Float:   true,
@@ -128,6 +128,19 @@ func (s *Schema) PrimaryKey() *Field {
 	return pks[0]
 }
 
+func (s *Schema) NativeFieldNames(names []string, scalarTypeOnly bool) []string {
+	var result []string
+	for _, name := range names {
+		if field := s.Fields[name]; field.Valid() {
+			if scalarTypeOnly && !field.IsScalarType() {
+				continue
+			}
+			result = append(result, field.NativeName)
+		}
+	}
+	return result
+}
+
 type Field struct {
 	Name            string        `json:"name,omitempty"`
 	NativeName      string        `json:"native_name,omitempty"`
@@ -157,6 +170,13 @@ type Field struct {
 
 func (f *Field) Valid() bool {
 	return f.Type != ""
+}
+
+func (f *Field) IsScalarType() bool {
+	if f.Type == Object || f.Type == Array {
+		return false
+	}
+	return scalarTypeMap[f.Type]
 }
 
 func (f *Field) Clone() *Field {

@@ -34,7 +34,7 @@ func main() {
 
 	// query
 	var list []*examples.Permission
-	if err := Permission.Find().Or("ID >", 16, "Code $PREFIX", "2023").All(&list); err != nil {
+	if err := Permission.Find().Select("ID", "Code").Or("ID >", 16, "Code $PREFIX", "2023").All(&list); err != nil {
 		log.Fatal(err)
 	}
 

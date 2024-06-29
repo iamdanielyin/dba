@@ -168,7 +168,7 @@ func (ns *Namespace) RepairRelationships() {
 					field.Relationship = rel
 				}
 				if field.ItemType != "" {
-					if !allBasicTypeMap[SchemaType(field.ItemType)] && schemas[field.ItemType] == nil {
+					if !scalarTypeMap[SchemaType(field.ItemType)] && schemas[field.ItemType] == nil {
 						field.ItemType = ""
 					}
 				}

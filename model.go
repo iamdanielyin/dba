@@ -186,9 +186,15 @@ func (r *Result) Offset(offset int) *Result {
 	return r
 }
 
-func (r *Result) Fields(names []string, isOmit ...bool) *Result {
+func (r *Result) Select(names ...string) *Result {
 	r.fields = names
-	r.isOmitFields = len(isOmit) > 0 && isOmit[0]
+	r.isOmitFields = false
+	return r
+}
+
+func (r *Result) Omit(names ...string) *Result {
+	r.fields = names
+	r.isOmitFields = true
 	return r
 }
 
@@ -429,10 +435,11 @@ func (r *Result) beforeQuery() *gorm.DB {
 	gdb = r.setOrderBys(gdb, r.orderBys)
 	gdb = r.setLimitAndOffset(gdb, r.limit, r.offset)
 	if len(r.fields) > 0 {
+		nativeNames := r.dm.schema.NativeFieldNames(r.fields, true)
 		if r.isOmitFields {
-			gdb = gdb.Omit(r.fields...)
+			gdb = gdb.Omit(nativeNames...)
 		} else {
-			gdb = gdb.Select(r.fields)
+			gdb = gdb.Select(nativeNames)
 		}
 	}
 	return gdb
