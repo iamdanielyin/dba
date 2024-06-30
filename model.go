@@ -9,6 +9,18 @@ import (
 	"sync"
 )
 
+type Action string
+
+const (
+	CREATE Action = "CREATE"
+	BATCH  Action = "BATCH"
+	UPDATE Action = "UPDATE"
+	DELETE Action = "DELETE"
+	ONE    Action = "ONE"
+	ALL    Action = "ALL"
+	COUNT  Action = "COUNT"
+)
+
 type DataModel struct {
 	conn   *Connection
 	schema *Schema
@@ -16,10 +28,14 @@ type DataModel struct {
 }
 
 func (dm *DataModel) Create(value any) error {
+	dm.gdb.InstanceSet("DBA_ACTION", CREATE)
+	dm.gdb.InstanceSet("DBA_MODEL", dm)
 	return dm.gdb.Create(value).Error
 }
 
 func (dm *DataModel) CreateInBatches(value any, batchSize int) error {
+	dm.gdb.InstanceSet("DBA_ACTION", BATCH)
+	dm.gdb.InstanceSet("DBA_MODEL", dm)
 	return dm.gdb.CreateInBatches(value, batchSize).Error
 }
 
@@ -28,6 +44,7 @@ func (dm *DataModel) Find(conditions ...any) *Result {
 		dm:       dm,
 		orderBys: make(map[string]bool),
 		cache:    new(sync.Map),
+		preload:  make(map[string]*PreloadOptions),
 	}
 	if len(conditions) > 0 {
 		if filters := parseConditions(filterOperatorAnd, conditions); len(filters) > 0 {
@@ -38,6 +55,8 @@ func (dm *DataModel) Find(conditions ...any) *Result {
 }
 
 type Result struct {
+	action       Action
+	cache        *sync.Map
 	dm           *DataModel
 	filters      []*Filter
 	orderBys     map[string]bool
@@ -45,7 +64,7 @@ type Result struct {
 	isOmitFields bool
 	limit        int
 	offset       int
-	cache        *sync.Map
+	preload      map[string]*PreloadOptions
 }
 
 func (r *Result) And(conditions ...any) *Result {
@@ -92,11 +111,26 @@ func (r *Result) Omit(names ...string) *Result {
 	return r
 }
 
+type PreloadOptions struct {
+}
+
+func (r *Result) Preload(name string, options ...*PreloadOptions) *Result {
+	s := r.dm.schema
+	opts := new(PreloadOptions)
+	if len(options) > 0 && options[0] != nil {
+		opts = options[0]
+	}
+	if f := s.Fields[name]; f.Valid() && f.Relationship != nil {
+		r.preload[name] = opts
+	}
+	return r
+}
+
 func (r *Result) One(dst any) error {
 	// FINAL
 	defer r.reset()
 
-	gdb := r.beforeQuery()
+	gdb := r.beforeQuery(ONE, dst)
 	if err := gdb.First(dst).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
@@ -107,7 +141,7 @@ func (r *Result) All(dst any) error {
 	// FINAL
 	defer r.reset()
 
-	gdb := r.beforeQuery()
+	gdb := r.beforeQuery(ALL, dst)
 	return gdb.Find(dst).Error
 }
 
@@ -115,7 +149,7 @@ func (r *Result) Count() (int, error) {
 	// FINAL
 	defer r.reset()
 
-	gdb := r.beforeQuery()
+	gdb := r.beforeQuery(COUNT)
 	var count int64
 	err := gdb.Count(&count).Error
 	return int(count), err
@@ -144,7 +178,7 @@ func (r *Result) Update(doc any) (int, error) {
 	// FINAL
 	defer r.reset()
 
-	gdb := r.beforeQuery()
+	gdb := r.beforeQuery(UPDATE)
 	values := r.dm.schema.ParseValue(doc, true)
 	ret := gdb.Updates(values)
 	return int(ret.RowsAffected), ret.Error
@@ -154,7 +188,7 @@ func (r *Result) Delete() (int, error) {
 	// FINAL
 	defer r.reset()
 
-	gdb := r.beforeQuery()
+	gdb := r.beforeQuery(DELETE)
 	ret := gdb.Delete(nil)
 	return int(ret.RowsAffected), ret.Error
 }
@@ -322,27 +356,39 @@ func (r *Result) setOrderBys(gdb *gorm.DB, orderBys map[string]bool) *gorm.DB {
 	return gdb
 }
 
-func (r *Result) setLimitAndOffset(gdb *gorm.DB, limit, offset int) *gorm.DB {
-	if limit != 0 {
-		gdb = gdb.Limit(limit)
-	}
-	if offset != 0 {
-		gdb = gdb.Offset(offset)
-	}
-	return gdb
-}
-
-func (r *Result) beforeQuery() *gorm.DB {
+func (r *Result) beforeQuery(action Action, dst ...any) *gorm.DB {
 	gdb := r.dm.gdb
+
+	// 设置过滤
 	gdb = r.setFilters(gdb, r.filters)
+
+	// 设置排序
 	gdb = r.setOrderBys(gdb, r.orderBys)
-	gdb = r.setLimitAndOffset(gdb, r.limit, r.offset)
+
+	// 设置offset和limit
+	if r.limit != 0 {
+		gdb = gdb.Limit(r.limit)
+	}
+	if r.offset != 0 {
+		gdb = gdb.Offset(r.offset)
+	}
+
+	// 设置select或omit字段
 	if len(r.fields) > 0 {
 		if r.isOmitFields {
 			gdb = gdb.Omit(r.fields...)
 		} else {
 			gdb = gdb.Select(r.fields)
 		}
+	}
+
+	// 设置缓存
+	r.action = action
+	gdb.InstanceSet("DBA_ACTION", action)
+	gdb.InstanceSet("DBA_MODEL", r.dm)
+	gdb.InstanceSet("DBA_RESULT", r)
+	if len(dst) > 0 && dst[0] != nil {
+		gdb.InstanceSet("DBA_DST", dst[0])
 	}
 	return gdb
 }
@@ -356,4 +402,5 @@ func (r *Result) reset() {
 	r.limit = 0
 	r.offset = 0
 	r.cache = new(sync.Map)
+	r.preload = make(map[string]*PreloadOptions)
 }

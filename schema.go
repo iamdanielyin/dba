@@ -38,13 +38,13 @@ var scalarTypeMap = map[SchemaType]bool{
 	Array:   true,
 }
 
-type SchemaRelationship string
+type RelationshipKind string
 
 const (
-	RelationshipHasOne  SchemaRelationship = "HAS_ONE"
-	RelationshipHasMany SchemaRelationship = "HAS_MANY"
-	RelationshipRefOne  SchemaRelationship = "REF_ONE"
-	RelationshipRefMany SchemaRelationship = "REF_MANY"
+	HasOne  RelationshipKind = "HAS_ONE"
+	HasMany RelationshipKind = "HAS_MANY"
+	RefOne  RelationshipKind = "REF_ONE"
+	RefMany RelationshipKind = "REF_MANY"
 )
 
 type SchemaInterface interface {
@@ -52,7 +52,8 @@ type SchemaInterface interface {
 }
 
 type Schema struct {
-	cache *sync.Map
+	cache      *sync.Map
+	structType reflect.Type
 
 	Name        string            `json:"name,omitempty"`
 	NativeName  string            `json:"native_name,omitempty"`
@@ -187,11 +188,11 @@ func (f *Field) Clone() *Field {
 }
 
 type Relationship struct {
-	Kind           SchemaRelationship `json:"kind,omitempty"`
-	SrcSchemaName  string             `json:"src_schema_name,omitempty"`
-	SrcSchemaField string             `json:"src_schema_field,omitempty"`
-	DstSchemaName  string             `json:"dst_schema_name,omitempty"`
-	DstSchemaField string             `json:"dst_schema_field,omitempty"`
+	Kind           RelationshipKind `json:"kind,omitempty"`
+	SrcSchemaName  string           `json:"src_schema_name,omitempty"`
+	SrcSchemaField string           `json:"src_schema_field,omitempty"`
+	DstSchemaName  string           `json:"dst_schema_name,omitempty"`
+	DstSchemaField string           `json:"dst_schema_field,omitempty"`
 
 	BrgSchemaName     string `json:"brg_schema_name,omitempty"`
 	BrgSchemaSrcField string `json:"brg_schema_src_field,omitempty"`
@@ -212,7 +213,7 @@ func (rs *Relationship) Clone() *Relationship {
 	return copied
 }
 
-func ParseSchemas(values ...any) ([]*Schema, error) {
+func ParseSchema(values ...any) ([]*Schema, error) {
 	var results []*Schema
 	for _, value := range values {
 		s, err := parseSchema(value)
@@ -247,6 +248,7 @@ func parseSchema(value any) (*Schema, error) {
 	s := structs.New(value)
 	structName := s.Name()
 	schema := Schema{
+		structType: reflectType,
 		Name:       structName,
 		NativeName: strcase.ToSnake(structName),
 		Fields:     make(map[string]*Field),
@@ -408,13 +410,13 @@ func parseRel(config string, currentSchema *Schema, currentField *Field, allSche
 	config = strings.TrimSpace(config)
 
 	var (
-		kind   SchemaRelationship
+		kind   RelationshipKind
 		others string
 	)
 	if i := strings.Index(config, ","); i <= 0 {
 		return nil
 	} else {
-		kind = SchemaRelationship(strings.ToUpper(config[:i]))
+		kind = RelationshipKind(strings.ToUpper(config[:i]))
 		others = config[i+1:]
 	}
 
@@ -425,9 +427,9 @@ func parseRel(config string, currentSchema *Schema, currentField *Field, allSche
 
 	_ = mergo.Merge(&rel, &currentField.Relationship)
 	switch kind {
-	case RelationshipHasOne,
-		RelationshipHasMany,
-		RelationshipRefOne:
+	case HasOne,
+		HasMany,
+		RefOne:
 		// HAS_ONE,ID->UserID
 		// HAS_MANY,ID->UserID
 		// REF_ONE,OrgID->ID
@@ -437,7 +439,7 @@ func parseRel(config string, currentSchema *Schema, currentField *Field, allSche
 		}
 		rel.SrcSchemaField = split[0]
 		rel.DstSchemaField = split[1]
-	case RelationshipRefMany:
+	case RefMany:
 		// 直接对表：REF_MANY,UserDept(ID->UserID,ID->DeptID)
 		// 对结构体：REF_MANY,user_role_ref(id->user_id,id->role_id)
 		fi := strings.Index(others, "(")

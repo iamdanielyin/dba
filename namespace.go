@@ -75,6 +75,7 @@ func (ns *Namespace) Connect(config *ConnectConfig) (*Connection, error) {
 		})
 		config.Name = fmt.Sprintf("%d", count)
 	}
+	registerCallbacks(gdb)
 	conn := &Connection{
 		ns:     ns,
 		driver: config.Driver,
@@ -118,7 +119,7 @@ func (ns *Namespace) DisconnectAll() {
 }
 
 func (ns *Namespace) RegisterSchema(value ...any) error {
-	ss, err := ParseSchemas(value...)
+	ss, err := ParseSchema(value...)
 	if err != nil {
 		return err
 	}
