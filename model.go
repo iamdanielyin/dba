@@ -435,11 +435,10 @@ func (r *Result) beforeQuery() *gorm.DB {
 	gdb = r.setOrderBys(gdb, r.orderBys)
 	gdb = r.setLimitAndOffset(gdb, r.limit, r.offset)
 	if len(r.fields) > 0 {
-		nativeNames := r.dm.schema.NativeFieldNames(r.fields, true)
 		if r.isOmitFields {
-			gdb = gdb.Omit(nativeNames...)
+			gdb = gdb.Omit(r.fields...)
 		} else {
-			gdb = gdb.Select(nativeNames)
+			gdb = gdb.Select(r.fields)
 		}
 	}
 	return gdb
