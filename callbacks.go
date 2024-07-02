@@ -16,6 +16,12 @@ func preloadCallback(db *gorm.DB) {
 	if r == nil || len(r.preload) == 0 {
 		return
 	}
+	// dst为结构体 或 dst为结构体数组
+
+	// 汇总srcKeys
+	// 统一查询
+	// 按每项、每字段挨个回填
+
 	//var dst any
 	//if v, ok := db.InstanceGet("DBA_DST"); ok {
 	//	dst = v

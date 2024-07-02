@@ -19,7 +19,7 @@ type User struct {
 	OrgID       uint        `dba:"title=所属组织ID"`
 	Org         *Org        `dba:"title=所属组织;rel=REF_ONE,OrgID->ID"`
 	Roles       []*Role     `dba:"title=拥有角色;rel=REF_MANY,user_role_ref(id->user_id,id->role_id)"` // 直接对表
-	Departments []*UserDept `dba:"title=所属部门;rel=REF_MANY,UserDept(ID->UserID,ID->DeptID)"`        // 对结构体
+	Departments []*UserDept `dba:"title=所属部门;rel=HAS_MANY,UserDept(ID->UserID,ID->DeptID)"`        // 对结构体
 }
 
 type Profile struct {
