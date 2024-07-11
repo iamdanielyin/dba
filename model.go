@@ -1,10 +1,8 @@
 package dba
 
 import (
-	"errors"
 	"fmt"
 	"gorm.io/gorm"
-	"math"
 	"strings"
 	"sync"
 )
@@ -28,15 +26,34 @@ type DataModel struct {
 }
 
 func (dm *DataModel) Create(value any) error {
-	dm.gdb.InstanceSet("DBA_ACTION", CREATE)
-	dm.gdb.InstanceSet("DBA_MODEL", dm)
-	return dm.gdb.Create(value).Error
+	gdb := dm.beforeCreate(CREATE)
+	return gdb.Create(value).Error
 }
 
 func (dm *DataModel) CreateInBatches(value any, batchSize int) error {
-	dm.gdb.InstanceSet("DBA_ACTION", BATCH)
+	gdb := dm.beforeCreate(BATCH)
+	return gdb.CreateInBatches(value, batchSize).Error
+}
+
+func (dm *DataModel) beforeCreate(action Action) *gorm.DB {
+	dm.gdb.InstanceSet("DBA_ACTION", action)
 	dm.gdb.InstanceSet("DBA_MODEL", dm)
-	return dm.gdb.CreateInBatches(value, batchSize).Error
+	gdb := dm.omitNotScalarFields().gdb
+	gdb = gdb.Table(dm.schema.NativeName).Model(nil)
+	return gdb
+}
+
+func (dm *DataModel) omitNotScalarFields() *DataModel {
+	var fields []string
+	for _, field := range dm.schema.Fields {
+		if !field.IsScalarType() {
+			fields = append(fields, field.Name)
+		}
+	}
+	if len(fields) > 0 {
+		dm.gdb = dm.gdb.Omit(fields...)
+	}
+	return dm
 }
 
 func (dm *DataModel) Find(conditions ...any) *Result {
@@ -114,7 +131,7 @@ func (r *Result) Omit(names ...string) *Result {
 type PreloadOptions struct {
 }
 
-func (r *Result) Preload(name string, options ...*PreloadOptions) *Result {
+func (r *Result) PreloadBy(name string, options ...*PreloadOptions) *Result {
 	s := r.dm.schema
 	opts := new(PreloadOptions)
 	if len(options) > 0 && options[0] != nil {
@@ -126,71 +143,11 @@ func (r *Result) Preload(name string, options ...*PreloadOptions) *Result {
 	return r
 }
 
-func (r *Result) One(dst any) error {
-	// FINAL
-	defer r.reset()
-
-	gdb := r.beforeQuery(ONE, dst)
-	if err := gdb.First(dst).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
+func (r *Result) Preload(names ...string) *Result {
+	for _, name := range names {
+		r.PreloadBy(name)
 	}
-	return nil
-}
-
-func (r *Result) All(dst any) error {
-	// FINAL
-	defer r.reset()
-
-	gdb := r.beforeQuery(ALL, dst)
-	return gdb.Find(dst).Error
-}
-
-func (r *Result) Count() (int, error) {
-	// FINAL
-	defer r.reset()
-
-	gdb := r.beforeQuery(COUNT)
-	var count int64
-	err := gdb.Count(&count).Error
-	return int(count), err
-}
-
-func (r *Result) Paginate(pageNum int, pageSize int, dst any) (totalRecords int, totalPages int, err error) {
-	// FINAL
-	defer r.reset()
-
-	r.offset = (pageNum - 1) * pageSize
-	r.limit = pageSize
-	if err = r.All(dst); err != nil {
-		return
-	}
-
-	gdb := r.dm.gdb
-	var count int64
-	if err = gdb.Limit(-1).Offset(-1).Count(&count).Error; err == nil {
-		totalRecords = int(count)
-		totalPages = int(math.Ceil(float64(count) / float64(pageSize)))
-	}
-	return
-}
-
-func (r *Result) Update(doc any) (int, error) {
-	// FINAL
-	defer r.reset()
-
-	gdb := r.beforeQuery(UPDATE)
-	values := r.dm.schema.ParseValue(doc, true)
-	ret := gdb.Updates(values)
-	return int(ret.RowsAffected), ret.Error
-}
-
-func (r *Result) Delete() (int, error) {
-	// FINAL
-	defer r.reset()
-
-	gdb := r.beforeQuery(DELETE)
-	ret := gdb.Delete(nil)
-	return int(ret.RowsAffected), ret.Error
+	return r
 }
 
 func (r *Result) orderBy(isDesc bool, names []string) *Result {
@@ -391,16 +348,4 @@ func (r *Result) beforeQuery(action Action, dst ...any) *gorm.DB {
 		gdb.InstanceSet("DBA_DST", dst[0])
 	}
 	return gdb
-}
-
-func (r *Result) reset() {
-	gdb := r.dm.conn.NewDB()
-	gdb = gdb.Table(r.dm.schema.NativeName)
-	r.dm.gdb = gdb
-	r.filters = nil
-	r.orderBys = make(map[string]bool)
-	r.limit = 0
-	r.offset = 0
-	r.cache = new(sync.Map)
-	r.preload = make(map[string]*PreloadOptions)
 }

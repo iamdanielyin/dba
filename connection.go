@@ -123,7 +123,8 @@ func (c *Connection) genDDLWithSQLite(sortedNames []string, schemas map[string]*
 	for _, name := range sortedNames {
 		schema := schemas[name]
 		var (
-			columns []string
+			columns        []string
+			primaryColumns []string
 		)
 		for _, field := range schema.Fields {
 			var buffer bytes.Buffer
@@ -148,7 +149,9 @@ func (c *Connection) genDDLWithSQLite(sortedNames []string, schemas map[string]*
 			}
 			buffer.WriteString(nativeType)
 			if field.IsPrimary {
-				buffer.WriteString(" PRIMARY KEY")
+				if field.IsPrimary {
+					primaryColumns = append(primaryColumns, field.NativeName)
+				}
 			} else {
 				if field.IsRequired {
 					buffer.WriteString(" NOT NULL")
@@ -161,6 +164,7 @@ func (c *Connection) genDDLWithSQLite(sortedNames []string, schemas map[string]*
 		if len(columns) == 0 {
 			continue
 		}
+		columns = append(columns, fmt.Sprintf("PRIMARY KEY (%s)", strings.Join(primaryColumns, ",")))
 		var buffer bytes.Buffer
 		if len(ignoreComments) > 0 && !ignoreComments[0] {
 			buffer.WriteString(fmt.Sprintf("-- create \"%s\" table\n", schema.NativeName))

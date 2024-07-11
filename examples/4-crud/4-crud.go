@@ -15,6 +15,12 @@ func main() {
 	}
 
 	err := dba.RegisterSchema(
+		&examples.Org{},
+		&examples.User{},
+		&examples.Profile{},
+		&examples.Account{},
+		&examples.Dept{},
+		&examples.UserDept{},
 		&examples.Role{},
 		&examples.Permission{},
 	)

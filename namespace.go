@@ -45,6 +45,7 @@ func (ns *Namespace) Connect(config *ConnectConfig) (*Connection, error) {
 			IgnoreRecordNotFoundError: false,
 			Colorful:                  true,
 		}),
+		FullSaveAssociations:                     false,
 		DisableForeignKeyConstraintWhenMigrating: true,
 		NamingStrategy: gschema.NamingStrategy{
 			TablePrefix: "",
