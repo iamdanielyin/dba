@@ -2,16 +2,12 @@ package dba
 
 import (
 	"fmt"
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/pkg/errors"
-	"gorm.io/driver/mysql"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
-	gschema "gorm.io/gorm/schema"
-	"log"
-	"os"
 	"sync"
-	"time"
 )
 
 type Namespace struct {
@@ -21,50 +17,28 @@ type Namespace struct {
 }
 
 type ConnectConfig struct {
-	Name        string
-	Driver      Driver
-	Dsn         string
-	ShowSQL     bool
-	TablePrefix string
+	Name   string
+	Driver Driver
+	Dsn    string
+	//ShowSQL     bool
+	//TablePrefix string
 }
 
 func (ns *Namespace) Connect(config *ConnectConfig) (*Connection, error) {
-	var dial gorm.Dialector
+	var (
+		xdb *sqlx.DB
+		err error
+	)
 	switch config.Driver {
 	case MYSQL:
-		dial = mysql.Open(config.Dsn)
+		xdb, err = sqlx.Connect("mysql", config.Dsn)
 	case SQLITE:
-		dial = sqlite.Open(config.Dsn)
+		xdb, err = sqlx.Connect("sqlite3", config.Dsn)
+	case POSTGRES:
+		xdb, err = sqlx.Connect("postgres", config.Dsn)
 	default:
 		return nil, errors.Errorf("dba: invalid driver: %s", config.Driver)
 	}
-	gConf := gorm.Config{
-		Logger: logger.New(log.New(os.Stdout, "\r\n", log.LstdFlags), logger.Config{
-			SlowThreshold:             200 * time.Millisecond,
-			LogLevel:                  logger.Warn,
-			IgnoreRecordNotFoundError: false,
-			Colorful:                  true,
-		}),
-		FullSaveAssociations:                     false,
-		DisableForeignKeyConstraintWhenMigrating: true,
-		NamingStrategy: gschema.NamingStrategy{
-			TablePrefix: "",
-		},
-	}
-	if config.ShowSQL {
-		gConf.Logger = logger.New(log.New(os.Stdout, "\r\n", log.LstdFlags), logger.Config{
-			SlowThreshold:             200 * time.Millisecond,
-			LogLevel:                  logger.Info,
-			IgnoreRecordNotFoundError: false,
-			Colorful:                  true,
-		})
-	}
-	if config.TablePrefix != "" {
-		gConf.NamingStrategy = gschema.NamingStrategy{
-			TablePrefix: config.TablePrefix,
-		}
-	}
-	gdb, err := gorm.Open(dial, &gConf)
 	if err != nil {
 		return nil, errors.Wrap(err, "dba: connect failed")
 	}
@@ -76,13 +50,13 @@ func (ns *Namespace) Connect(config *ConnectConfig) (*Connection, error) {
 		})
 		config.Name = fmt.Sprintf("%d", count)
 	}
-	registerCallbacks(gdb)
+	//registerCallbacks(gdb)
 	conn := &Connection{
 		ns:     ns,
 		driver: config.Driver,
 		dsn:    config.Dsn,
 		name:   config.Name,
-		gdb:    gdb,
+		xdb:    xdb,
 	}
 	ns.connections.Store(config.Name, conn)
 	return conn, nil

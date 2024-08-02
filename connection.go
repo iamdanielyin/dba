@@ -3,6 +3,7 @@ package dba
 import (
 	"bytes"
 	"fmt"
+	"github.com/jmoiron/sqlx"
 	"gorm.io/gorm"
 	"sort"
 	"strings"
@@ -17,8 +18,9 @@ var DefaultNamespace = &Namespace{
 type Driver string
 
 const (
-	MYSQL  Driver = "MYSQL"
-	SQLITE Driver = "SQLITE"
+	MYSQL    Driver = "MYSQL"
+	SQLITE   Driver = "SQLITE"
+	POSTGRES Driver = "POSTGRES"
 )
 
 type Connection struct {
@@ -26,7 +28,7 @@ type Connection struct {
 	driver Driver
 	dsn    string
 	name   string
-	gdb    *gorm.DB
+	xdb    *sqlx.DB
 }
 
 func (c *Connection) AutoMigrate(values ...any) error {
