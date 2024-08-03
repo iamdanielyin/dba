@@ -2,8 +2,10 @@ package dba
 
 import (
 	"fmt"
+	"github.com/Masterminds/sprig"
 	"github.com/pkg/errors"
 	"sync"
+	"text/template"
 )
 
 type Namespace struct {
@@ -13,9 +15,13 @@ type Namespace struct {
 }
 
 type ConnectConfig struct {
-	Name   string
-	Driver string
-	Dsn    string
+	Name          string
+	Driver        string
+	Dsn           string
+	CreateClauses string
+	DeleteClauses string
+	UpdateClauses string
+	QueryClauses  string
 }
 
 func (ns *Namespace) Connect(config *ConnectConfig) (*Connection, error) {
@@ -46,6 +52,28 @@ func (ns *Namespace) Connect(config *ConnectConfig) (*Connection, error) {
 		name:    config.Name,
 		xdb:     xdb,
 	}
+	var (
+		createClauses = config.CreateClauses
+		deleteClauses = config.DeleteClauses
+		updateClauses = config.UpdateClauses
+		queryClauses  = config.QueryClauses
+	)
+	if createClauses == "" {
+		createClauses = adapter.CreateClauses()
+	}
+	if deleteClauses == "" {
+		deleteClauses = adapter.DeleteClauses()
+	}
+	if updateClauses == "" {
+		updateClauses = adapter.UpdateClauses()
+	}
+	if queryClauses == "" {
+		queryClauses = adapter.QueryClauses()
+	}
+	conn.CreateTemplate = template.Must(template.New("").Funcs(sprig.FuncMap()).Parse(createClauses))
+	conn.DeleteTemplate = template.Must(template.New("").Funcs(sprig.FuncMap()).Parse(deleteClauses))
+	conn.UpdateTemplate = template.Must(template.New("").Funcs(sprig.FuncMap()).Parse(updateClauses))
+	conn.QueryTemplate = template.Must(template.New("").Funcs(sprig.FuncMap()).Parse(queryClauses))
 	ns.connections.Store(config.Name, conn)
 	return conn, nil
 }
@@ -176,9 +204,32 @@ func (ns *Namespace) ModelBySession(connectionName, schemaName string) *DataMode
 		panic(fmt.Errorf("schema not exists: %s", schemaName))
 	}
 
+	var (
+		createTemplate = conn.CreateTemplate
+		deleteTemplate = conn.DeleteTemplate
+		updateTemplate = conn.UpdateTemplate
+		queryTemplate  = conn.QueryTemplate
+	)
+	if s.CreateClauses != "" {
+		createTemplate = template.Must(template.New("").Funcs(sprig.FuncMap()).Parse(s.CreateClauses))
+	}
+	if s.DeleteClauses != "" {
+		deleteTemplate = template.Must(template.New("").Funcs(sprig.FuncMap()).Parse(s.DeleteClauses))
+	}
+	if s.UpdateClauses != "" {
+		updateTemplate = template.Must(template.New("").Funcs(sprig.FuncMap()).Parse(s.UpdateClauses))
+	}
+	if s.QueryClauses != "" {
+		queryTemplate = template.Must(template.New("").Funcs(sprig.FuncMap()).Parse(s.QueryClauses))
+	}
+
 	return &DataModel{
-		conn:   conn,
-		schema: s,
-		xdb:    conn.xdb,
+		conn:           conn,
+		schema:         s,
+		xdb:            conn.xdb,
+		createTemplate: createTemplate,
+		deleteTemplate: deleteTemplate,
+		updateTemplate: updateTemplate,
+		queryTemplate:  queryTemplate,
 	}
 }

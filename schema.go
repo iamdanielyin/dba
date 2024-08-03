@@ -59,6 +59,11 @@ type Schema struct {
 	NativeName  string            `json:"native_name,omitempty"`
 	Description string            `json:"description,omitempty"`
 	Fields      map[string]*Field `json:"fields,omitempty"`
+
+	CreateClauses string `json:"create_clauses,omitempty"`
+	UpdateClauses string `json:"update_clauses,omitempty"`
+	DeleteClauses string `json:"delete_clauses,omitempty"`
+	QueryClauses  string `json:"query_clauses,omitempty"`
 }
 
 func (s *Schema) Clone() *Schema {

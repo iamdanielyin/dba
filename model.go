@@ -1,6 +1,7 @@
 package dba
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
@@ -8,6 +9,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"text/template"
 )
 
 type Action string
@@ -23,27 +25,27 @@ const (
 )
 
 type DataModel struct {
-	conn   *Connection
-	schema *Schema
-	xdb    *sqlx.DB
+	conn           *Connection
+	schema         *Schema
+	xdb            *sqlx.DB
+	createTemplate *template.Template
+	deleteTemplate *template.Template
+	updateTemplate *template.Template
+	queryTemplate  *template.Template
 }
 
 func (dm *DataModel) Create(value any) error {
-	gdb := dm.beforeCreate(CREATE)
+	tplData := map[string]any{
+		"TableName": dm.schema.NativeName,
+	}
+	var buff bytes.Buffer
+	dm.createTemplate.Execute(&buff, tplData)
 	return gdb.Create(value).Error
 }
 
 func (dm *DataModel) CreateInBatches(value any, batchSize int) error {
 	gdb := dm.beforeCreate(BATCH)
 	return gdb.CreateInBatches(value, batchSize).Error
-}
-
-func (dm *DataModel) beforeCreate(action Action) *gorm.DB {
-	dm.gdb.InstanceSet("DBA_ACTION", action)
-	dm.gdb.InstanceSet("DBA_MODEL", dm)
-	gdb := dm.omitNotScalarFields().gdb
-	gdb = gdb.Table(dm.schema.NativeName).Model(nil)
-	return gdb
 }
 
 func (dm *DataModel) omitNotScalarFields() *DataModel {

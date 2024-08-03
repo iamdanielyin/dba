@@ -4,6 +4,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"sort"
 	"sync"
+	"text/template"
 )
 
 var DefaultNamespace = &Namespace{
@@ -12,11 +13,15 @@ var DefaultNamespace = &Namespace{
 }
 
 type Connection struct {
-	ns      *Namespace
-	adapter Adapter
-	dsn     string
-	name    string
-	xdb     *sqlx.DB
+	ns             *Namespace
+	adapter        Adapter
+	dsn            string
+	name           string
+	xdb            *sqlx.DB
+	CreateTemplate *template.Template
+	UpdateTemplate *template.Template
+	DeleteTemplate *template.Template
+	QueryTemplate  *template.Template
 }
 
 func (c *Connection) Init(schemas ...map[string]*Schema) error {
