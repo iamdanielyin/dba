@@ -83,28 +83,63 @@ func (m *mysqlAdapter) GenDDL(sortedNames []string, schemas map[string]*Schema, 
 }
 
 func (m *mysqlAdapter) CreateClauses() string {
+	//INSERT INTO table_name (column1, column2, column3, ...)
+	//VALUES
+	//(value1a, value2a, value3a, ...),
+	//(value1b, value2b, value3b, ...),
+	//(value1c, value2c, value3c, ...)
+	//ON DUPLICATE KEY UPDATE column1 = VALUES(column1), column2 = VALUES(column2), ...;
+
 	return `INSERT INTO {{.TableName}} ({{.Columns}})
 			VALUES
 			{{.Rows}}
-			{{if .OnConflict}}
-			ON DUPLICATE KEY UPDATE {{.OnConflictUpdate}}
+			{{if .OnConflictUpdates}}
+			ON DUPLICATE KEY UPDATE {{.OnConflictUpdates}}
 			{{end}}`
 }
 
 func (m *mysqlAdapter) DeleteClauses() string {
-	//TODO implement me
-	panic("implement me")
-	//deleteClauses = []string{"DELETE", "FROM", "WHERE"}
+	//DELETE FROM students
+	//WHERE student_id = 1;
+	return `DELETE FROM {{.TableName}}
+			WHERE {{.Conditions}}`
 }
 
 func (m *mysqlAdapter) UpdateClauses() string {
-	//TODO implement me
-	panic("implement me")
-	//updateClauses = []string{"UPDATE", "SET", "WHERE"}
+	//UPDATE students
+	//SET name = 'Alice', age = 21
+	//WHERE student_id = 1;
+	return `UPDATE {{.TableName}}
+			SET {{.Sets}}
+			WHERE {{.Conditions}}`
 }
 
 func (m *mysqlAdapter) QueryClauses() string {
-	//TODO implement me
-	panic("implement me")
-	//queryClauses  = []string{"SELECT", "FROM", "WHERE", "GROUP BY", "ORDER BY", "LIMIT", "FOR"}
+	//SELECT column1, column2, ...
+	//FROM table_name
+	//WHERE condition
+	//GROUP BY column1, column2, ...
+	//HAVING condition
+	//ORDER BY column1, column2, ...
+	//LIMIT offset, count;
+	//假设每页显示 N 条记录，要查询第 P 页的数据：
+	//offset = (P - 1) * N
+	//count = N
+	return `SELECT {{if .Columns}}{{.Columns}}{{else}}*{{end}}
+			FROM {{.TableName}}
+			{{if .Conditions}}
+			WHERE {{.Conditions}}
+			{{end}
+			{{if .GroupBys}}
+			GROUP BY {{.GroupBys}}
+			{{end}}
+			{{if .Having}}
+			HAVING {{.Having}}
+			{{end}}
+			{{if .OrderBys}}
+			ORDER BY {{.OrderBys}}
+			{{end}}
+			{{if .Paginate}}
+			LIMIT {{.Paginate.Offset}}, {{.Paginate.Limit}}
+			{{end}}`
 }
