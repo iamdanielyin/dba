@@ -2,10 +2,6 @@ package dba
 
 import (
 	"fmt"
-	_ "github.com/go-sql-driver/mysql"
-	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/pkg/errors"
 	"sync"
 )
@@ -18,27 +14,20 @@ type Namespace struct {
 
 type ConnectConfig struct {
 	Name   string
-	Driver Driver
+	Driver string
 	Dsn    string
-	//ShowSQL     bool
-	//TablePrefix string
 }
 
 func (ns *Namespace) Connect(config *ConnectConfig) (*Connection, error) {
-	var (
-		xdb *sqlx.DB
-		err error
-	)
-	switch config.Driver {
-	case MYSQL:
-		xdb, err = sqlx.Connect("mysql", config.Dsn)
-	case SQLITE:
-		xdb, err = sqlx.Connect("sqlite3", config.Dsn)
-	case POSTGRES:
-		xdb, err = sqlx.Connect("postgres", config.Dsn)
-	default:
+	adapter := adapters[config.Driver]
+	if adapter == nil {
 		return nil, errors.Errorf("dba: invalid driver: %s", config.Driver)
 	}
+	xdb, err := adapter.Connect(config)
+	if err != nil {
+		return nil, errors.Wrap(err, "dba: connect failed")
+	}
+	err = xdb.Ping()
 	if err != nil {
 		return nil, errors.Wrap(err, "dba: connect failed")
 	}
@@ -50,13 +39,12 @@ func (ns *Namespace) Connect(config *ConnectConfig) (*Connection, error) {
 		})
 		config.Name = fmt.Sprintf("%d", count)
 	}
-	//registerCallbacks(gdb)
 	conn := &Connection{
-		ns:     ns,
-		driver: config.Driver,
-		dsn:    config.Dsn,
-		name:   config.Name,
-		xdb:    xdb,
+		ns:      ns,
+		adapter: adapter,
+		dsn:     config.Dsn,
+		name:    config.Name,
+		xdb:     xdb,
 	}
 	ns.connections.Store(config.Name, conn)
 	return conn, nil
@@ -188,11 +176,9 @@ func (ns *Namespace) ModelBySession(connectionName, schemaName string) *DataMode
 		panic(fmt.Errorf("schema not exists: %s", schemaName))
 	}
 
-	gdb := conn.NewDB()
-	gdb = gdb.Table(s.NativeName)
 	return &DataModel{
 		conn:   conn,
 		schema: s,
-		gdb:    gdb,
+		xdb:    conn.xdb,
 	}
 }

@@ -1,6 +1,6 @@
 package dba
 
-func Connect(drv Driver, dsn string, config ...*ConnectConfig) error {
+func Connect(drv, dsn string, config ...*ConnectConfig) error {
 	var c *ConnectConfig
 	if len(config) > 0 && config[0] != nil {
 		c = config[0]
