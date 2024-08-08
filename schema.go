@@ -76,6 +76,40 @@ func (s *Schema) Clone() *Schema {
 	return copied
 }
 
+func (s *Schema) NativeFields() map[string]*Field {
+	if v, ok := s.Cache().Load("NATIVE_FIELDS"); ok {
+		return v.(map[string]*Field)
+	}
+	nf := make(map[string]*Field)
+	for _, field := range s.Fields {
+		nf[field.NativeName] = field
+	}
+	s.Cache().Store("NATIVE_FIELDS", nf)
+	return nf
+}
+
+func (s *Schema) ScalarFields() []*Field {
+	if v, ok := s.Cache().Load("SCALAR_FIELDS"); ok {
+		return v.([]*Field)
+	}
+	var fields []*Field
+	for _, field := range s.Fields {
+		if field.IsScalarType() {
+			fields = append(fields, field)
+		}
+	}
+	s.Cache().Store("SCALAR_FIELDS", fields)
+	return fields
+}
+
+func (s *Schema) ScalarFieldNativeNames() []string {
+	var names []string
+	for _, f := range s.ScalarFields() {
+		names = append(names, f.NativeName)
+	}
+	return names
+}
+
 func (s *Schema) ParseValue(data any, useNativeName bool) map[string]any {
 	values := make(map[string]any)
 

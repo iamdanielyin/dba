@@ -2,7 +2,7 @@ package dba
 
 import (
 	"fmt"
-	"github.com/Masterminds/sprig"
+	"github.com/Masterminds/sprig/v3"
 	"github.com/pkg/errors"
 	"sync"
 	"text/template"
@@ -25,11 +25,11 @@ type ConnectConfig struct {
 }
 
 func (ns *Namespace) Connect(config *ConnectConfig) (*Connection, error) {
-	adapter := adapters[config.Driver]
-	if adapter == nil {
+	driver := drivers[config.Driver]
+	if driver == nil {
 		return nil, errors.Errorf("dba: invalid driver: %s", config.Driver)
 	}
-	xdb, err := adapter.Connect(config)
+	xdb, err := driver.Connect(config)
 	if err != nil {
 		return nil, errors.Wrap(err, "dba: connect failed")
 	}
@@ -46,11 +46,11 @@ func (ns *Namespace) Connect(config *ConnectConfig) (*Connection, error) {
 		config.Name = fmt.Sprintf("%d", count)
 	}
 	conn := &Connection{
-		ns:      ns,
-		adapter: adapter,
-		dsn:     config.Dsn,
-		name:    config.Name,
-		xdb:     xdb,
+		ns:     ns,
+		driver: driver,
+		dsn:    config.Dsn,
+		name:   config.Name,
+		xdb:    xdb,
 	}
 	var (
 		createClauses = config.CreateClauses
@@ -59,16 +59,16 @@ func (ns *Namespace) Connect(config *ConnectConfig) (*Connection, error) {
 		queryClauses  = config.QueryClauses
 	)
 	if createClauses == "" {
-		createClauses = adapter.CreateClauses()
+		createClauses = driver.CreateClauses()
 	}
 	if deleteClauses == "" {
-		deleteClauses = adapter.DeleteClauses()
+		deleteClauses = driver.DeleteClauses()
 	}
 	if updateClauses == "" {
-		updateClauses = adapter.UpdateClauses()
+		updateClauses = driver.UpdateClauses()
 	}
 	if queryClauses == "" {
-		queryClauses = adapter.QueryClauses()
+		queryClauses = driver.QueryClauses()
 	}
 	conn.CreateTemplate = template.Must(template.New("").Funcs(sprig.FuncMap()).Parse(createClauses))
 	conn.DeleteTemplate = template.Must(template.New("").Funcs(sprig.FuncMap()).Parse(deleteClauses))

@@ -35,17 +35,75 @@ type DataModel struct {
 }
 
 func (dm *DataModel) Create(value any) error {
-	tplData := map[string]any{
-		"TableName": dm.schema.NativeName,
-	}
-	var buff bytes.Buffer
-	dm.createTemplate.Execute(&buff, tplData)
-	return gdb.Create(value).Error
+	return dm.CreateInBatches(value, 10)
 }
 
 func (dm *DataModel) CreateInBatches(value any, batchSize int) error {
-	gdb := dm.beforeCreate(BATCH)
-	return gdb.CreateInBatches(value, batchSize).Error
+	ruv, err := NewReflectUtils(value)
+	if err != nil {
+		return err
+	}
+	columns := dm.schema.ScalarFieldNativeNames()
+	var vars [][]any
+	nativeFields := dm.schema.NativeFields()
+	switch ruv.TypeCategory() {
+	case CategoryStruct, CategoryStructPointer, CategoryMapStringAny:
+		var rowVars []any
+		for _, column := range columns {
+			field := nativeFields[column]
+			v, _ := ruv.GetFieldOrKey(value, field.Name)
+			rowVars = append(rowVars, v)
+		}
+		vars = append(vars, rowVars)
+	case CategoryStructSliceOrArray, CategoryStructPointerSliceOrArray, CategoryMapStringAnyPointerSliceOrArray:
+		size, _ := ruv.GetLen()
+		for i := 0; i < size; i++ {
+			elem, e := ruv.GetElement(i)
+			if e != nil {
+				continue
+			}
+			var rowVars []any
+			for _, column := range columns {
+				field := nativeFields[column]
+				v, _ := ruv.GetFieldOrKey(elem, field.Name)
+				rowVars = append(rowVars, v)
+			}
+			vars = append(vars, rowVars)
+		}
+	}
+	placeholders := make([]string, len(vars))
+	for i := 0; i < len(placeholders); i++ {
+		var rowPlaceholders []string
+		for _, _ = range vars[i] {
+			rowPlaceholders = append(rowPlaceholders, "?")
+		}
+		placeholders[i] = "(" + strings.Join(rowPlaceholders, ",") + ")"
+	}
+	data := map[string]any{
+		"TableName": dm.schema.NativeName,
+		"Columns":   strings.Join(columns, ", "),
+		"Rows":      strings.Join(placeholders, ", "),
+	}
+	var buff bytes.Buffer
+	if err := dm.createTemplate.Execute(&buff, data); err != nil {
+		return err
+	}
+	sql := buff.String()
+	var args []any
+	for _, row := range vars {
+		for _, v := range row {
+			args = append(args, v)
+		}
+	}
+	r, err := dm.xdb.Exec(sql, args...)
+	if err != nil {
+		return err
+	}
+	_, err = r.LastInsertId()
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (dm *DataModel) omitNotScalarFields() *DataModel {

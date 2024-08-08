@@ -14,7 +14,7 @@ var DefaultNamespace = &Namespace{
 
 type Connection struct {
 	ns             *Namespace
-	adapter        Adapter
+	driver         Driver
 	dsn            string
 	name           string
 	xdb            *sqlx.DB
@@ -46,7 +46,7 @@ func (c *Connection) GenDDL(schemas map[string]*Schema, ignoreComments ...bool) 
 		sortedNames = append(sortedNames, name)
 	}
 	sort.Strings(sortedNames)
-	return c.adapter.GenDDL(sortedNames, schemas, ignoreComments...)
+	return c.driver.GenDDL(sortedNames, schemas, ignoreComments...)
 }
 
 func (c *Connection) Exec(sql string, values ...any) (int, error) {
