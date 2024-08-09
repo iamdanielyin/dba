@@ -43,80 +43,92 @@ func (dm *DataModel) CreateInBatches(value any, batchSize int) error {
 	if err != nil {
 		return err
 	}
+
 	columns := dm.schema.ScalarFieldNativeNames()
-	var vars [][]any
 	nativeFields := dm.schema.NativeFields()
+	var allVars [][]any
+
 	switch ruv.TypeCategory() {
 	case CategoryStruct, CategoryStructPointer, CategoryMapStringAny:
-		var rowVars []any
-		for _, column := range columns {
-			field := nativeFields[column]
-			v, _ := ruv.GetFieldOrKey(value, field.Name)
-			rowVars = append(rowVars, v)
-		}
-		vars = append(vars, rowVars)
+		// 单个值插入
+		rowVars := extractRowVars(ruv, value, columns, nativeFields)
+		allVars = append(allVars, rowVars)
+
 	case CategoryStructSliceOrArray, CategoryStructPointerSliceOrArray, CategoryMapStringAnyPointerSliceOrArray:
+		// 切片或数组插入
 		size, _ := ruv.GetLen()
 		for i := 0; i < size; i++ {
 			elem, e := ruv.GetElement(i)
 			if e != nil {
 				continue
 			}
-			var rowVars []any
-			for _, column := range columns {
-				field := nativeFields[column]
-				v, _ := ruv.GetFieldOrKey(elem, field.Name)
-				rowVars = append(rowVars, v)
-			}
-			vars = append(vars, rowVars)
+			rowVars := extractRowVars(ruv, elem, columns, nativeFields)
+			allVars = append(allVars, rowVars)
 		}
 	}
+
+	// 分批插入
+	for i := 0; i < len(allVars); i += batchSize {
+		end := i + batchSize
+		if end > len(allVars) {
+			end = len(allVars)
+		}
+
+		varsBatch := allVars[i:end]
+		if err := dm.insertBatch(columns, varsBatch); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// extractRowVars 提取单行数据
+func extractRowVars(ruv *ReflectUtils, value any, columns []string, nativeFields map[string]*Field) []any {
+	var rowVars []any
+	for _, column := range columns {
+		field := nativeFields[column]
+		v, _ := ruv.GetFieldOrKey(value, field.Name)
+		rowVars = append(rowVars, v)
+	}
+	return rowVars
+}
+
+// insertBatch 插入一批数据
+func (dm *DataModel) insertBatch(columns []string, vars [][]any) error {
 	placeholders := make([]string, len(vars))
 	for i := 0; i < len(placeholders); i++ {
-		var rowPlaceholders []string
-		for _, _ = range vars[i] {
-			rowPlaceholders = append(rowPlaceholders, "?")
+		rowPlaceholders := make([]string, len(vars[i]))
+		for j := range rowPlaceholders {
+			rowPlaceholders[j] = "?"
 		}
 		placeholders[i] = "(" + strings.Join(rowPlaceholders, ",") + ")"
 	}
+
 	data := map[string]any{
 		"TableName": dm.schema.NativeName,
 		"Columns":   strings.Join(columns, ", "),
 		"Rows":      strings.Join(placeholders, ", "),
 	}
+
 	var buff bytes.Buffer
 	if err := dm.createTemplate.Execute(&buff, data); err != nil {
 		return err
 	}
+
 	sql := buff.String()
 	var args []any
 	for _, row := range vars {
-		for _, v := range row {
-			args = append(args, v)
-		}
+		args = append(args, row...)
 	}
+
 	r, err := dm.xdb.Exec(sql, args...)
 	if err != nil {
 		return err
 	}
-	_, err = r.LastInsertId()
-	if err != nil {
-		return err
-	}
-	return nil
-}
 
-func (dm *DataModel) omitNotScalarFields() *DataModel {
-	var fields []string
-	for _, field := range dm.schema.Fields {
-		if !field.IsScalarType() {
-			fields = append(fields, field.Name)
-		}
-	}
-	if len(fields) > 0 {
-		dm.gdb = dm.gdb.Omit(fields...)
-	}
-	return dm
+	_, err = r.LastInsertId()
+	return err
 }
 
 func (dm *DataModel) Find(conditions ...any) *Result {

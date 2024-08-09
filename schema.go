@@ -144,7 +144,7 @@ func (s *Schema) Cache() *sync.Map {
 	return s.cache
 }
 
-func (s *Schema) PrimaryKeys() []*Field {
+func (s *Schema) PrimaryFields() []*Field {
 	if v, ok := s.Cache().Load("PRIMARY_KEYS"); ok {
 		return v.([]*Field)
 	}
@@ -160,12 +160,21 @@ func (s *Schema) PrimaryKeys() []*Field {
 	return pks
 }
 
-func (s *Schema) PrimaryKey() *Field {
-	pks := s.PrimaryKeys()
+func (s *Schema) PrimaryField() *Field {
+	pks := s.PrimaryFields()
 	if len(pks) == 0 {
 		return nil
 	}
 	return pks[0]
+}
+
+func (s *Schema) AutoIncrField() *Field {
+	for _, f := range s.Fields {
+		if f.IsAutoIncrement {
+			return f
+		}
+	}
+	return nil
 }
 
 func (s *Schema) NativeFieldNames(names []string, scalarTypeOnly bool) []string {
