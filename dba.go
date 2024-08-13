@@ -1,5 +1,12 @@
 package dba
 
+import "sync"
+
+var DefaultNamespace = &Namespace{
+	connections: new(sync.Map),
+	schemas:     new(sync.Map),
+}
+
 func Connect(drv, dsn string, config ...*ConnectConfig) error {
 	var c *ConnectConfig
 	if len(config) > 0 && config[0] != nil {

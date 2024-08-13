@@ -3,14 +3,8 @@ package dba
 import (
 	"github.com/jmoiron/sqlx"
 	"sort"
-	"sync"
 	"text/template"
 )
-
-var DefaultNamespace = &Namespace{
-	connections: new(sync.Map),
-	schemas:     new(sync.Map),
-}
 
 type Connection struct {
 	ns             *Namespace

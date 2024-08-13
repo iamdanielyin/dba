@@ -6,6 +6,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 	"gorm.io/gorm"
+	"math"
 	"strings"
 	"sync"
 	"text/template"
@@ -388,8 +389,40 @@ func (r *Result) setOrderBys(gdb *gorm.DB, orderBys map[string]bool) *gorm.DB {
 }
 
 func (r *Result) beforeQuery(action Action, dst ...any) *gorm.DB {
-	//TODO implement me
-	panic("implement me")
+	gdb := r.dm.gdb
+
+	// 设置过滤
+	gdb = r.setFilters(gdb, r.filters)
+
+	// 设置排序
+	gdb = r.setOrderBys(gdb, r.orderBys)
+
+	// 设置offset和limit
+	if r.limit != 0 {
+		gdb = gdb.Limit(r.limit)
+	}
+	if r.offset != 0 {
+		gdb = gdb.Offset(r.offset)
+	}
+
+	// 设置select或omit字段
+	if len(r.fields) > 0 {
+		if r.isOmitFields {
+			gdb = gdb.Omit(r.fields...)
+		} else {
+			gdb = gdb.Select(r.fields)
+		}
+	}
+
+	// 设置缓存
+	r.action = action
+	gdb.InstanceSet("DBA_ACTION", action)
+	gdb.InstanceSet("DBA_MODEL", r.dm)
+	gdb.InstanceSet("DBA_RESULT", r)
+	if len(dst) > 0 && dst[0] != nil {
+		gdb.InstanceSet("DBA_DST", dst[0])
+	}
+	return gdb
 }
 
 func (r *Result) One(dst any) error {
@@ -422,8 +455,22 @@ func (r *Result) Count() (int, error) {
 }
 
 func (r *Result) Paginate(pageNum int, pageSize int, dst any) (totalRecords int, totalPages int, err error) {
-	//TODO implement me
-	panic("implement me")
+	// FINAL
+	defer r.reset()
+
+	r.offset = (pageNum - 1) * pageSize
+	r.limit = pageSize
+	if err = r.All(dst); err != nil {
+		return
+	}
+
+	gdb := r.dm.gdb
+	var count int64
+	if err = gdb.Limit(-1).Offset(-1).Count(&count).Error; err == nil {
+		totalRecords = int(count)
+		totalPages = int(math.Ceil(float64(count) / float64(pageSize)))
+	}
+	return
 }
 
 func (r *Result) Update(doc any) (int, error) {
@@ -446,6 +493,9 @@ func (r *Result) Delete() (int, error) {
 }
 
 func (r *Result) reset() {
+	gdb := r.dm.conn.NewDB()
+	gdb = gdb.Table(r.dm.schema.NativeName)
+	r.dm.gdb = gdb
 	r.filters = nil
 	r.orderBys = make(map[string]bool)
 	r.limit = 0
