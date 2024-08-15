@@ -35,6 +35,11 @@ func NewReflectUtils(a any) (*ReflectUtils, error) {
 	}, nil
 }
 
+// Value 返回原始值
+func (ru *ReflectUtils) Value() any {
+	return ru.value
+}
+
 // TypeCategory 返回变量的类型类别
 func (ru *ReflectUtils) TypeCategory() TypeCategory {
 	switch ru.typ.Kind() {

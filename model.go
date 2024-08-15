@@ -34,7 +34,7 @@ type DataModel struct {
 }
 
 func (dm *DataModel) Create(value any) error {
-	return dm.CreateInBatches(value, 10)
+	return dm.CreateInBatches(value, 50)
 }
 
 func (dm *DataModel) CreateInBatches(value any, batchSize int) error {
@@ -47,6 +47,7 @@ func (dm *DataModel) CreateInBatches(value any, batchSize int) error {
 	nativeFields := dm.schema.NativeFields()
 	var allVars [][]any
 
+	var isArray bool
 	switch ruv.TypeCategory() {
 	case CategoryStruct, CategoryStructPointer, CategoryMapStringAny:
 		// 单个值插入
@@ -54,17 +55,21 @@ func (dm *DataModel) CreateInBatches(value any, batchSize int) error {
 		allVars = append(allVars, rowVars)
 
 	case CategoryStructSliceOrArray, CategoryStructPointerSliceOrArray, CategoryMapStringAnyPointerSliceOrArray:
+		isArray = true
 		// 切片或数组插入
 		size, _ := ruv.GetLen()
+		allVars = make([][]any, size)
 		for i := 0; i < size; i++ {
 			elem, e := ruv.GetElement(i)
 			if e != nil {
 				continue
 			}
 			rowVars := extractRowVars(ruv, elem, columns, nativeFields)
-			allVars = append(allVars, rowVars)
+			allVars[i] = rowVars
 		}
 	}
+
+	aif := dm.schema.AutoIncrField()
 
 	// 分批插入
 	for i := 0; i < len(allVars); i += batchSize {
@@ -74,8 +79,22 @@ func (dm *DataModel) CreateInBatches(value any, batchSize int) error {
 		}
 
 		varsBatch := allVars[i:end]
-		if err := dm.insertBatch(columns, varsBatch); err != nil {
+		lastInsertId, err := dm.insertBatch(columns, varsBatch)
+		if err != nil {
 			return err
+		}
+		if lastInsertId > 0 && aif != nil {
+			// 设置自增字段
+			insertID := lastInsertId
+			for j := end - 1; j >= i; j-- {
+				if isArray {
+					elem, _ := ruv.GetElement(j)
+					_ = ruv.SetFieldOrKey(elem, aif.Name, insertID)
+				} else {
+					_ = ruv.SetFieldOrKey(ruv.Value(), aif.Name, insertID)
+				}
+				insertID--
+			}
 		}
 	}
 
@@ -94,7 +113,7 @@ func extractRowVars(ruv *ReflectUtils, value any, columns []string, nativeFields
 }
 
 // insertBatch 插入一批数据
-func (dm *DataModel) insertBatch(columns []string, vars [][]any) error {
+func (dm *DataModel) insertBatch(columns []string, vars [][]any) (int64, error) {
 	placeholders := make([]string, len(vars))
 	for i := 0; i < len(placeholders); i++ {
 		rowPlaceholders := make([]string, len(vars[i]))
@@ -112,7 +131,7 @@ func (dm *DataModel) insertBatch(columns []string, vars [][]any) error {
 
 	var buff bytes.Buffer
 	if err := dm.createTemplate.Execute(&buff, data); err != nil {
-		return err
+		return 0, err
 	}
 
 	sql := buff.String()
@@ -123,11 +142,10 @@ func (dm *DataModel) insertBatch(columns []string, vars [][]any) error {
 
 	r, err := dm.xdb.Exec(sql, args...)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
-	_, err = r.LastInsertId()
-	return err
+	return r.LastInsertId()
 }
 
 func (dm *DataModel) Find(conditions ...any) *Result {
