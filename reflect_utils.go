@@ -1,8 +1,13 @@
 package dba
 
 import (
+	"database/sql"
 	"fmt"
+	"github.com/jinzhu/now"
 	"reflect"
+	"strconv"
+	"sync"
+	"time"
 )
 
 // TypeCategory 表示变量类型的类别
@@ -18,10 +23,10 @@ const (
 	CategoryUnknown                         TypeCategory = "Unknown"
 )
 
-// ReflectUtils 提供反射工具方法
 type ReflectUtils struct {
-	value reflect.Value
-	typ   reflect.Type
+	value        reflect.Value
+	typ          reflect.Type
+	cachedValues sync.Map // 使用 sync.Map 替代普通 map
 }
 
 // NewReflectUtils 创建一个新的 ReflectUtils 对象
@@ -133,52 +138,189 @@ func (ru *ReflectUtils) GetElement(index int) (any, error) {
 	return ru.value.Index(index).Interface(), nil
 }
 
-// GetFieldOrKey 获取元素的指定字段或键的值
+// getFieldReflectValue 获取指定字段的 reflect.Value。
+// 如果字段是指针类型且为空，则创建新实例并解引用。
+// 如果字段不存在或无效，则返回错误。
+// 支持嵌套结构体的递归获取。
+func getFieldReflectValue(v reflect.Value, fieldName string) (reflect.Value, error) {
+	v = reflect.Indirect(v) // 解引用指针，以获取实际值而非指针本身
+	for v.Kind() == reflect.Struct {
+		fieldVal := v.FieldByName(fieldName)
+		if !fieldVal.IsValid() {
+			return reflect.Value{}, fmt.Errorf("字段%s不存在", fieldName)
+		}
+		if fieldVal.Kind() == reflect.Ptr {
+			if fieldVal.IsNil() {
+				fieldVal.Set(reflect.New(fieldVal.Type().Elem())) // 如果指针为空，创建新实例
+			}
+			v = fieldVal.Elem() // 继续解引用指针
+		} else {
+			return fieldVal, nil
+		}
+	}
+	return reflect.Value{}, fmt.Errorf("字段%s无法获取值", fieldName)
+}
+
+// GetFieldOrKey 获取指定结构体字段或 map 键的值。
+// 如果是结构体，将尝试获取字段的 reflect.Value 并返回其 Interface()。
+// 如果是 map，将尝试获取指定键的值。
+// 如果字段或键不存在，或类型不支持，返回错误。
 func (ru *ReflectUtils) GetFieldOrKey(elem any, name string) (any, error) {
 	val := reflect.ValueOf(elem)
+
 	switch val.Kind() {
-	case reflect.Struct:
-		fieldVal := val.FieldByName(name)
-		if !fieldVal.IsValid() {
-			return nil, fmt.Errorf("字段%s不存在", name)
+	case reflect.Struct, reflect.Ptr:
+		// 获取目标字段的 reflect.Value
+		fieldVal, err := getFieldReflectValue(val, name)
+		if err != nil {
+			return nil, err
 		}
 		return fieldVal.Interface(), nil
-	case reflect.Ptr:
-		if val.Elem().Kind() == reflect.Struct {
-			return ru.GetFieldOrKey(val.Elem().Interface(), name)
-		}
+
 	case reflect.Map:
+		// 处理 map 类型，通过键名获取对应的值
 		keyVal := val.MapIndex(reflect.ValueOf(name))
 		if !keyVal.IsValid() {
 			return nil, fmt.Errorf("键%s不存在", name)
 		}
 		return keyVal.Interface(), nil
 	}
+
 	return nil, fmt.Errorf("不支持的类型")
 }
 
-// SetFieldOrKey 更新元素的指定字段或键的值
+// SetFieldOrKey 设置指定结构体字段或 map 键的值。
+// 对于结构体类型，尝试获取字段的 reflect.Value 并设置新值。
+// 对于 map 类型，通过键名设置对应的值。
+// 如果字段不可设置或类型不支持，返回错误。
 func (ru *ReflectUtils) SetFieldOrKey(elem any, name string, value any) error {
 	val := reflect.ValueOf(elem)
+
 	switch val.Kind() {
-	case reflect.Struct:
-		fieldVal := val.FieldByName(name)
-		if !fieldVal.IsValid() {
-			return fmt.Errorf("字段%s不存在", name)
+	case reflect.Struct, reflect.Ptr:
+		// 获取目标字段的 reflect.Value
+		fieldVal, err := getFieldReflectValue(val, name)
+		if err != nil {
+			return err
 		}
+
 		if !fieldVal.CanSet() {
 			return fmt.Errorf("字段%s不可设置", name)
 		}
+
+		// 根据字段类型进行相应的设置操作
+		switch fieldVal.Kind() {
+		case reflect.Bool:
+			if data, ok := value.(bool); ok {
+				fieldVal.SetBool(data)
+				return nil
+			} else if data, ok := value.(string); ok {
+				b, _ := strconv.ParseBool(data)
+				fieldVal.SetBool(b)
+				return nil
+			}
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			if data, ok := value.(int64); ok {
+				fieldVal.SetInt(data)
+				return nil
+			} else if data, ok := value.(string); ok {
+				if i, err := strconv.ParseInt(data, 0, 64); err == nil {
+					fieldVal.SetInt(i)
+					return nil
+				} else {
+					return err
+				}
+			}
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			if data, ok := value.(uint64); ok {
+				fieldVal.SetUint(data)
+				return nil
+			} else if data, ok := value.(string); ok {
+				if i, err := strconv.ParseUint(data, 0, 64); err == nil {
+					fieldVal.SetUint(i)
+					return nil
+				} else {
+					return err
+				}
+			}
+		case reflect.Float32, reflect.Float64:
+			if data, ok := value.(float64); ok {
+				fieldVal.SetFloat(data)
+				return nil
+			} else if data, ok := value.(string); ok {
+				if f, err := strconv.ParseFloat(data, 64); err == nil {
+					fieldVal.SetFloat(f)
+					return nil
+				} else {
+					return err
+				}
+			}
+		case reflect.String:
+			if data, ok := value.(string); ok {
+				fieldVal.SetString(data)
+				return nil
+			}
+		case reflect.Struct:
+			// 处理 time.Time 类型
+			if fieldVal.Type() == reflect.TypeOf(time.Time{}) {
+				if data, ok := value.(time.Time); ok {
+					fieldVal.Set(reflect.ValueOf(data))
+					return nil
+				} else if data, ok := value.(string); ok {
+					if t, err := now.Parse(data); err == nil {
+						fieldVal.Set(reflect.ValueOf(t))
+						return nil
+					} else {
+						return fmt.Errorf("无法将值 %v 设置为 time.Time 类型字段 %s: %v", value, name, err)
+					}
+				}
+			}
+		case reflect.Ptr:
+			// 处理指针类型，创建新的实例并解引用设置值
+			if fieldVal.IsNil() {
+				fieldVal.Set(reflect.New(fieldVal.Type().Elem()))
+			}
+			if reflect.TypeOf(value).AssignableTo(fieldVal.Type().Elem()) {
+				fieldVal.Elem().Set(reflect.ValueOf(value))
+				return nil
+			} else if reflect.TypeOf(value).ConvertibleTo(fieldVal.Type().Elem()) {
+				fieldVal.Elem().Set(reflect.ValueOf(value).Convert(fieldVal.Type().Elem()))
+				return nil
+			}
+			// 处理指向时间类型的指针
+			if fieldVal.Type() == reflect.TypeOf(&time.Time{}) {
+				if data, ok := value.(*time.Time); ok {
+					fieldVal.Set(reflect.ValueOf(data))
+					return nil
+				} else if data, ok := value.(string); ok {
+					if t, err := now.Parse(data); err == nil {
+						fieldVal.Set(reflect.ValueOf(&t))
+						return nil
+					} else {
+						return fmt.Errorf("无法将值 %v 设置为 *time.Time 类型字段 %s: %v", value, name, err)
+					}
+				}
+			}
+		}
+
+		// 序列化与扫描器处理
+		if scanner, ok := fieldVal.Addr().Interface().(sql.Scanner); ok {
+			if err := scanner.Scan(value); err != nil {
+				return fmt.Errorf("无法将值 %v 扫描到字段 %s: %v", value, name, err)
+			}
+			return nil
+		}
+
+		// 如果没有匹配到特殊类型，使用默认的 Set 方式
 		fieldVal.Set(reflect.ValueOf(value))
 		return nil
-	case reflect.Ptr:
-		if val.Elem().Kind() == reflect.Struct {
-			return ru.SetFieldOrKey(val.Elem().Interface(), name, value)
-		}
+
 	case reflect.Map:
+		// 处理 map 类型，通过键名设置对应的值
 		val.SetMapIndex(reflect.ValueOf(name), reflect.ValueOf(value))
 		return nil
 	}
+
 	return fmt.Errorf("不支持的类型")
 }
 
