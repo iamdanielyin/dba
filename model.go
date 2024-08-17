@@ -15,7 +15,6 @@ type Action string
 
 const (
 	CREATE Action = "CREATE"
-	BATCH  Action = "BATCH"
 	UPDATE Action = "UPDATE"
 	DELETE Action = "DELETE"
 	ONE    Action = "ONE"
@@ -33,9 +32,20 @@ type DataModel struct {
 	queryTemplate  *template.Template
 }
 
+type ConflictResolutionStrategy string
+
+const (
+	ConflictIgnore         ConflictResolutionStrategy = "IGNORE"
+	ConflictUpdatePartial  ConflictResolutionStrategy = "UPDATE_PARTIAL"
+	ConflictUpdateComputed ConflictResolutionStrategy = "UPDATE_COMPUTED"
+)
+
 type CreateOptions struct {
-	BatchSize int
-	SharedTx  bool // 新增字段，用于指定是否所有批次共用一个事务
+	BatchSize            int
+	SharedTx             bool                       // 用于指定是否所有批次共用一个事务
+	ConflictResolution   ConflictResolutionStrategy // 指定冲突处理方式
+	UpdateColumns        []string                   // 在部分更新情况下指定要更新的列
+	ComputedUpdateValues map[string]any             // 在计算更新情况下指定更新的值
 }
 
 func (dm *DataModel) Create(value any, options ...*CreateOptions) error {
@@ -106,10 +116,10 @@ func (dm *DataModel) Create(value any, options ...*CreateOptions) error {
 			}
 		}
 
-		lastInsertId, err := dm.insertBatchWithTx(tx, columns, varsBatch)
+		lastInsertId, err := dm.insertBatchWithTx(tx, columns, varsBatch, &opts)
 		if err != nil {
 			if tx != nil {
-				tx.Rollback()
+				_ = tx.Rollback()
 			}
 			return err
 		}
@@ -158,7 +168,7 @@ func extractRowVars(ruv *ReflectUtils, value any, columns []string, nativeFields
 }
 
 // insertBatchWithTx 使用指定的事务插入一批数据
-func (dm *DataModel) insertBatchWithTx(tx *sqlx.Tx, columns []string, vars [][]any) (int64, error) {
+func (dm *DataModel) insertBatchWithTx(tx *sqlx.Tx, columns []string, vars [][]any, opts *CreateOptions) (int64, error) {
 	placeholders := make([]string, len(vars))
 	for i := 0; i < len(placeholders); i++ {
 		rowPlaceholders := make([]string, len(vars[i]))
@@ -172,6 +182,38 @@ func (dm *DataModel) insertBatchWithTx(tx *sqlx.Tx, columns []string, vars [][]a
 		"TableName": dm.schema.NativeName,
 		"Columns":   strings.Join(columns, ", "),
 		"Rows":      strings.Join(placeholders, ", "),
+	}
+
+	if opts.ConflictResolution != "" {
+		data["ConflictResolution"] = opts.ConflictResolution
+
+		var (
+			conflictUpdateColumns []string
+			conflictUpdateValues  []any
+		)
+		switch opts.ConflictResolution {
+		case ConflictIgnore:
+		case ConflictUpdatePartial:
+			for _, column := range opts.UpdateColumns {
+				conflictUpdateColumns = append(conflictUpdateColumns, fmt.Sprintf("%s = VALUES(%s)", column, column))
+			}
+		case ConflictUpdateComputed:
+			if len(opts.ComputedUpdateValues) > 0 {
+				for key, val := range opts.ComputedUpdateValues {
+					conflictUpdateColumns = append(conflictUpdateColumns, fmt.Sprintf("%s = ?", key))
+					conflictUpdateValues = append(conflictUpdateValues, val)
+				}
+			}
+		}
+		if len(conflictUpdateColumns) > 0 {
+			data["ConflictUpdateValues"] = strings.Join(conflictUpdateColumns, ", ")
+		}
+		if len(conflictUpdateValues) > 0 {
+			for i, items := range vars {
+				items = append(items, conflictUpdateValues...)
+				vars[i] = items
+			}
+		}
 	}
 
 	var buff bytes.Buffer
