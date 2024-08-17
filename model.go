@@ -33,11 +33,20 @@ type DataModel struct {
 	queryTemplate  *template.Template
 }
 
-func (dm *DataModel) Create(value any) error {
-	return dm.CreateInBatches(value, 50)
+type CreateOptions struct {
+	BatchSize int
+	SharedTx  bool // 新增字段，用于指定是否所有批次共用一个事务
 }
 
-func (dm *DataModel) CreateInBatches(value any, batchSize int) error {
+func (dm *DataModel) Create(value any, options ...*CreateOptions) error {
+	var opts CreateOptions
+	if len(options) > 0 && options[0] != nil {
+		opts = *options[0]
+	}
+	if opts.BatchSize == 0 {
+		opts.BatchSize = 50
+	}
+
 	ruv, err := NewReflectUtils(value)
 	if err != nil {
 		return err
@@ -71,21 +80,50 @@ func (dm *DataModel) CreateInBatches(value any, batchSize int) error {
 
 	aif := dm.schema.AutoIncrField()
 
+	var tx *sqlx.Tx
+	if opts.SharedTx {
+		// 开启一个事务供所有批次使用
+		tx, err = dm.xdb.Beginx()
+		if err != nil {
+			return err
+		}
+	}
+
 	// 分批插入
-	for i := 0; i < len(allVars); i += batchSize {
-		end := i + batchSize
+	for i := 0; i < len(allVars); i += opts.BatchSize {
+		end := i + opts.BatchSize
 		if end > len(allVars) {
 			end = len(allVars)
 		}
 
 		varsBatch := allVars[i:end]
-		lastInsertId, err := dm.insertBatch(columns, varsBatch)
+
+		// 如果不共用事务，每个批次单独开启事务
+		if !opts.SharedTx {
+			tx, err = dm.xdb.Beginx()
+			if err != nil {
+				return err
+			}
+		}
+
+		lastInsertId, err := dm.insertBatchWithTx(tx, columns, varsBatch)
 		if err != nil {
+			if tx != nil {
+				tx.Rollback()
+			}
 			return err
 		}
+
+		if !opts.SharedTx {
+			// 提交每个批次的事务
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+		}
+
+		insertID := lastInsertId
 		if lastInsertId > 0 && aif != nil {
 			// 设置自增字段
-			insertID := lastInsertId
 			for j := end - 1; j >= i; j-- {
 				if isArray {
 					elem, _ := ruv.GetElement(j)
@@ -95,6 +133,13 @@ func (dm *DataModel) CreateInBatches(value any, batchSize int) error {
 				}
 				insertID--
 			}
+		}
+	}
+
+	if opts.SharedTx {
+		// 所有批次共用一个事务，提交事务
+		if err := tx.Commit(); err != nil {
+			return err
 		}
 	}
 
@@ -112,8 +157,8 @@ func extractRowVars(ruv *ReflectUtils, value any, columns []string, nativeFields
 	return rowVars
 }
 
-// insertBatch 插入一批数据
-func (dm *DataModel) insertBatch(columns []string, vars [][]any) (int64, error) {
+// insertBatchWithTx 使用指定的事务插入一批数据
+func (dm *DataModel) insertBatchWithTx(tx *sqlx.Tx, columns []string, vars [][]any) (int64, error) {
 	placeholders := make([]string, len(vars))
 	for i := 0; i < len(placeholders); i++ {
 		rowPlaceholders := make([]string, len(vars[i]))
@@ -140,7 +185,7 @@ func (dm *DataModel) insertBatch(columns []string, vars [][]any) (int64, error) 
 		args = append(args, row...)
 	}
 
-	r, err := dm.xdb.Exec(sql, args...)
+	r, err := tx.Exec(sql, args...)
 	if err != nil {
 		return 0, err
 	}
