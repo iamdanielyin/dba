@@ -126,9 +126,9 @@ func (m *mysqlDriver) QueryClauses() string {
 	//offset = (P - 1) * N
 	//count = N
 	return `SELECT {{if .Columns}}{{.Columns}}{{else}}*{{end}}
-			FROM {{.TableName}}
-			{{if .Conditions}}
-			WHERE {{.Conditions}}
+			FROM {{.Table}}
+			{{if .Where}}
+			WHERE {{.Where}}
 			{{end}
 			{{if .GroupBys}}
 			GROUP BY {{.GroupBys}}
@@ -139,7 +139,7 @@ func (m *mysqlDriver) QueryClauses() string {
 			{{if .OrderBys}}
 			ORDER BY {{.OrderBys}}
 			{{end}}
-			{{if .Paginate}}
-			LIMIT {{.Paginate.Offset}}, {{.Paginate.Limit}}
+			{{if .Limit}}
+			LIMIT {{if .Offset}}{{.Offset}}, {{end}}{{.Limit}}
 			{{end}}`
 }

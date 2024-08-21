@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/jmoiron/sqlx"
-	"github.com/pkg/errors"
 	"gorm.io/gorm"
 	"strings"
 	"sync"
@@ -179,9 +178,9 @@ func (dm *DataModel) insertBatchWithTx(tx *sqlx.Tx, columns []string, vars [][]a
 	}
 
 	data := map[string]any{
-		"TableName": dm.schema.NativeName,
-		"Columns":   strings.Join(columns, ", "),
-		"Rows":      strings.Join(placeholders, ", "),
+		"Table":   dm.schema.NativeName,
+		"Columns": strings.Join(columns, ", "),
+		"Rows":    strings.Join(placeholders, ", "),
 	}
 
 	if opts.ConflictResolution != "" {
@@ -251,16 +250,16 @@ func (dm *DataModel) Find(conditions ...any) *Result {
 }
 
 type Result struct {
-	action       Action
-	cache        *sync.Map
-	dm           *DataModel
-	filters      []*Filter
-	orderBys     map[string]bool
-	fields       []string
-	isOmitFields bool
-	limit        int
-	offset       int
-	preload      map[string]*PreloadOptions
+	action     Action
+	cache      *sync.Map
+	dm         *DataModel
+	filters    []*Filter
+	orderBys   map[string]bool
+	fieldNames []string
+	isOmit     bool
+	limit      int
+	offset     int
+	preload    map[string]*PreloadOptions
 }
 
 func (r *Result) And(conditions ...any) *Result {
@@ -296,14 +295,14 @@ func (r *Result) Offset(offset int) *Result {
 }
 
 func (r *Result) Select(names ...string) *Result {
-	r.fields = names
-	r.isOmitFields = false
+	r.fieldNames = names
+	r.isOmit = false
 	return r
 }
 
 func (r *Result) Omit(names ...string) *Result {
-	r.fields = names
-	r.isOmitFields = true
+	r.fieldNames = names
+	r.isOmit = true
 	return r
 }
 
@@ -337,18 +336,8 @@ func (r *Result) orderBy(isDesc bool, names []string) *Result {
 	return r
 }
 
-func (r *Result) getFieldNativeName(key string) (*Field, string) {
-	schema := r.dm.schema
-	if field := schema.Fields[key]; field.Valid() {
-		return field, field.NativeName
-	}
-	return nil, ""
-}
-
-func (r *Result) setFilters(gdb *gorm.DB, filters []*Filter) *gorm.DB {
-	if _, ok := r.cache.Load("SET_FILTERS"); ok {
-		return gdb
-	}
+func parseWhere(schema *Schema, filters []*Filter) (string, []any) {
+	nativeFields := schema.NativeFields()
 
 	if len(filters) > 0 {
 		var setItem func(filterOperator, []*Filter) (string, []any)
@@ -376,9 +365,9 @@ func (r *Result) setFilters(gdb *gorm.DB, filters []*Filter) *gorm.DB {
 					entryList := item.entryList.([]*Entry)
 					for _, entry := range entryList {
 						key := entry.Key
-						field, nv := r.getFieldNativeName(key)
-						if nv != "" {
-							key = nv
+						field := nativeFields[key]
+						if field.Valid() && field.NativeName != "" {
+							key = field.NativeName
 						}
 						switch entry.Op {
 						case entryOpEqual:
@@ -467,53 +456,159 @@ func (r *Result) setFilters(gdb *gorm.DB, filters []*Filter) *gorm.DB {
 				return s, attrs
 			}
 		}
-		query, attrs := setItem(filterOperatorAnd, filters)
-		gdb = gdb.Where(query, attrs...)
+		return setItem(filterOperatorAnd, filters)
 	}
-	r.cache.Store("SET_FILTERS", true)
-	return gdb
+	return "", nil
 }
 
-func (r *Result) setOrderBys(gdb *gorm.DB, orderBys map[string]bool) *gorm.DB {
-	if _, ok := r.cache.Load("SET_ORDER_BYS"); ok {
-		return gdb
-	}
+func parseOrderBys(schema *Schema, orderBys map[string]bool) (string, []any) {
+	nativeFields := schema.NativeFields()
+
+	var clauses []string
 	for key, val := range orderBys {
-		if _, nv := r.getFieldNativeName(key); nv != "" {
-			key = nv
+		if f := nativeFields[key]; f.Valid() && f.NativeName != "" {
+			key = f.NativeName
 		}
 		if val {
-			gdb = gdb.Order(fmt.Sprintf("%s DESC", key))
+			clauses = append(clauses, fmt.Sprintf("%s DESC", key))
 		} else {
-			gdb = gdb.Order(fmt.Sprintf("%s", key))
+			clauses = append(clauses, fmt.Sprintf("%s", key))
 		}
 	}
-	r.cache.Store("SET_ORDER_BYS", true)
-	return gdb
+	if len(clauses) > 0 {
+		return strings.Join(clauses, ","), nil
+	}
+	return "", nil
 }
 
-func (r *Result) beforeQuery(action Action, dst ...any) *gorm.DB {
+func (r *Result) beforeQueryBak(action Action, dst ...any) *gorm.DB {
 	//TODO implement me
 	panic("implement me")
+	//gdb := r.dm.gdb
+	//
+	//// 设置过滤
+	//gdb = r.setFilters(gdb, r.filters)
+	//
+	//// 设置排序
+	//gdb = r.setOrderBys(gdb, r.orderBys)
+	//
+	//// 设置offset和limit
+	//if r.limit != 0 {
+	//	gdb = gdb.Limit(r.limit)
+	//}
+	//if r.offset != 0 {
+	//	gdb = gdb.Offset(r.offset)
+	//}
+	//
+	//// 设置select或omit字段
+	//if len(r.fieldNames) > 0 {
+	//	if r.isOmit {
+	//		gdb = gdb.Omit(r.fieldNames...)
+	//	} else {
+	//		gdb = gdb.Select(r.fieldNames)
+	//	}
+	//}
+	//
+	//// 设置缓存
+	//r.action = action
+	//gdb.InstanceSet("DBA_ACTION", action)
+	//gdb.InstanceSet("DBA_MODEL", r.dm)
+	//gdb.InstanceSet("DBA_RESULT", r)
+	//if len(dst) > 0 && dst[0] != nil {
+	//	gdb.InstanceSet("DBA_DST", dst[0])
+	//}
+	//return gdb
+}
+func (r *Result) beforeQuery() (map[string]any, []any) {
+	var attrs []any
+	// 解析过滤
+	whereClause, whereAttrs := parseWhere(r.dm.schema, r.filters)
+	if len(whereAttrs) > 0 {
+		attrs = append(attrs, whereAttrs...)
+	}
+	// 解析排序
+	orderByClause, orderByAttrs := parseOrderBys(r.dm.schema, r.orderBys)
+	if len(orderByAttrs) > 0 {
+		attrs = append(attrs, orderByAttrs...)
+	}
+	data := map[string]any{
+		"Table":    r.dm.schema.NativeName,
+		"Where":    whereClause,
+		"GroupBys": orderByClause,
+	}
+	// 设置limit
+	if r.limit != 0 {
+		data["Limit"] = r.limit
+	}
+	// 设置offset
+	if r.offset != 0 {
+		data["Offset"] = r.offset
+	}
+	// 设置select或omit字段
+	var columns []string
+	if len(r.fieldNames) > 0 {
+		if r.isOmit {
+			scalarFields := r.dm.schema.ScalarFields()
+			var omitFieldsMap = make(map[string]bool)
+			for _, n := range r.fieldNames {
+				omitFieldsMap[n] = true
+			}
+			for _, f := range scalarFields {
+				if omitFieldsMap[f.Name] {
+					continue
+				}
+				columns = append(columns, f.NativeName)
+			}
+		} else {
+			for _, n := range r.fieldNames {
+				f := r.dm.schema.Fields[n]
+				if f.Valid() && f.NativeName != "" {
+					columns = append(columns, f.NativeName)
+				} else {
+					columns = append(columns, n)
+				}
+			}
+		}
+	} else {
+		columns = append(columns, "*")
+	}
+	if len(columns) > 0 {
+		data["Columns"] = strings.Join(columns, ", ")
+	}
+	return data, attrs
 }
 
 func (r *Result) One(dst any) error {
 	// FINAL
 	defer r.reset()
 
-	gdb := r.beforeQuery(ONE, dst)
-	if err := gdb.First(dst).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	data, attrs := r.beforeQuery()
+	var buff bytes.Buffer
+	if err := r.dm.queryTemplate.Execute(&buff, data); err != nil {
 		return err
 	}
-	return nil
+
+	sql := buff.String()
+	row := r.dm.xdb.QueryRowx(sql, attrs...)
+	return row.Scan(dst)
 }
 
 func (r *Result) All(dst any) error {
 	// FINAL
 	defer r.reset()
 
-	gdb := r.beforeQuery(ALL, dst)
-	return gdb.Find(dst).Error
+	data, attrs := r.beforeQuery()
+	var buff bytes.Buffer
+	if err := r.dm.queryTemplate.Execute(&buff, data); err != nil {
+		return err
+	}
+
+	sql := buff.String()
+	rows, err := r.dm.xdb.Queryx(sql, attrs...)
+	if err != nil {
+		return err
+	}
+	return rows.Scan(dst)
 }
 
 func (r *Result) Count() (int, error) {
