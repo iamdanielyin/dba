@@ -90,7 +90,7 @@ func (m *mysqlDriver) CreateClauses() string {
 	//(value1c, value2c, value3c, ...)
 	//ON DUPLICATE KEY UPDATE column1 = VALUES(column1), column2 = VALUES(column2), ...;
 
-	return `INSERT {{if eq .ConflictResolution "IGNORE"}}IGNORE {{end}}INTO {{.TableName}} ({{.Columns}})
+	return `INSERT {{if eq .ConflictResolution "IGNORE"}}IGNORE {{end}}INTO {{.Table}} ({{.Columns}})
 			VALUES
 			{{.Rows}}
 			{{if .ConflictUpdateValues}}
@@ -101,17 +101,17 @@ func (m *mysqlDriver) CreateClauses() string {
 func (m *mysqlDriver) DeleteClauses() string {
 	//DELETE FROM students
 	//WHERE student_id = 1;
-	return `DELETE FROM {{.TableName}}
-			WHERE {{.Conditions}}`
+	return `DELETE FROM {{.Table}}
+			WHERE {{.Where}}`
 }
 
 func (m *mysqlDriver) UpdateClauses() string {
 	//UPDATE students
 	//SET name = 'Alice', age = 21
 	//WHERE student_id = 1;
-	return `UPDATE {{.TableName}}
+	return `UPDATE {{.Table}}
 			SET {{.Sets}}
-			WHERE {{.Conditions}}`
+			WHERE {{.Where}}`
 }
 
 func (m *mysqlDriver) QueryClauses() string {

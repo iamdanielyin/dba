@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/jmoiron/sqlx"
-	"gorm.io/gorm"
+	"math"
+	"reflect"
 	"strings"
 	"sync"
 	"text/template"
@@ -138,7 +139,7 @@ func (dm *DataModel) Create(value any, options ...*CreateOptions) error {
 					elem, _ := ruv.GetElement(j)
 					_ = ruv.SetFieldOrKey(elem, aif.Name, insertID)
 				} else {
-					_ = ruv.SetFieldOrKey(ruv.Value(), aif.Name, insertID)
+					_ = ruv.SetFieldOrKey(ruv.Raw(), aif.Name, insertID)
 				}
 				insertID--
 			}
@@ -481,44 +482,6 @@ func parseOrderBys(schema *Schema, orderBys map[string]bool) (string, []any) {
 	return "", nil
 }
 
-func (r *Result) beforeQueryBak(action Action, dst ...any) *gorm.DB {
-	//TODO implement me
-	panic("implement me")
-	//gdb := r.dm.gdb
-	//
-	//// 设置过滤
-	//gdb = r.setFilters(gdb, r.filters)
-	//
-	//// 设置排序
-	//gdb = r.setOrderBys(gdb, r.orderBys)
-	//
-	//// 设置offset和limit
-	//if r.limit != 0 {
-	//	gdb = gdb.Limit(r.limit)
-	//}
-	//if r.offset != 0 {
-	//	gdb = gdb.Offset(r.offset)
-	//}
-	//
-	//// 设置select或omit字段
-	//if len(r.fieldNames) > 0 {
-	//	if r.isOmit {
-	//		gdb = gdb.Omit(r.fieldNames...)
-	//	} else {
-	//		gdb = gdb.Select(r.fieldNames)
-	//	}
-	//}
-	//
-	//// 设置缓存
-	//r.action = action
-	//gdb.InstanceSet("DBA_ACTION", action)
-	//gdb.InstanceSet("DBA_MODEL", r.dm)
-	//gdb.InstanceSet("DBA_RESULT", r)
-	//if len(dst) > 0 && dst[0] != nil {
-	//	gdb.InstanceSet("DBA_DST", dst[0])
-	//}
-	//return gdb
-}
 func (r *Result) beforeQuery() (map[string]any, []any) {
 	var attrs []any
 	// 解析过滤
@@ -536,12 +499,13 @@ func (r *Result) beforeQuery() (map[string]any, []any) {
 		"Where":    whereClause,
 		"GroupBys": orderByClause,
 	}
+
 	// 设置limit
-	if r.limit != 0 {
+	if r.limit > 0 {
 		data["Limit"] = r.limit
 	}
 	// 设置offset
-	if r.offset != 0 {
+	if r.offset > 0 {
 		data["Offset"] = r.offset
 	}
 	// 设置select或omit字段
@@ -578,6 +542,38 @@ func (r *Result) beforeQuery() (map[string]any, []any) {
 	return data, attrs
 }
 
+func autoScan(dst any, xdb *sqlx.DB, sql string, attrs []any) error {
+	ruv, err := NewReflectUtils(dst)
+	if err != nil {
+		return err
+	}
+
+	switch ruv.TypeCategory() {
+	case CategoryStruct, CategoryStructPointer:
+		return xdb.Get(dst, sql, attrs...)
+	case CategoryMapStringAny:
+		return xdb.QueryRowx(sql, attrs...).MapScan(dst.(map[string]any))
+	case CategoryStructSliceOrArray, CategoryStructPointerSliceOrArray:
+		return xdb.Select(dst, sql, attrs...)
+	case CategoryMapStringAnyPointerSliceOrArray:
+		rows, err := xdb.Queryx(sql, attrs...)
+		if err != nil {
+			return err
+		}
+		sliceValue := reflect.ValueOf(ruv.CreateEmptyCopy())
+		for rows.Next() {
+			elem, _ := ruv.CreateEmptyElement()
+			if err = rows.MapScan(elem.(map[string]any)); err == nil {
+				elemValue := reflect.ValueOf(elem)
+				sliceValue = reflect.Append(sliceValue, elemValue)
+			}
+		}
+		ruv.Value().Set(sliceValue)
+	}
+
+	return nil
+}
+
 func (r *Result) One(dst any) error {
 	// FINAL
 	defer r.reset()
@@ -587,10 +583,9 @@ func (r *Result) One(dst any) error {
 	if err := r.dm.queryTemplate.Execute(&buff, data); err != nil {
 		return err
 	}
-
 	sql := buff.String()
-	row := r.dm.xdb.QueryRowx(sql, attrs...)
-	return row.Scan(dst)
+
+	return autoScan(dst, r.dm.xdb, sql, attrs)
 }
 
 func (r *Result) All(dst any) error {
@@ -602,47 +597,108 @@ func (r *Result) All(dst any) error {
 	if err := r.dm.queryTemplate.Execute(&buff, data); err != nil {
 		return err
 	}
-
 	sql := buff.String()
-	rows, err := r.dm.xdb.Queryx(sql, attrs...)
-	if err != nil {
-		return err
-	}
-	return rows.Scan(dst)
+
+	return autoScan(dst, r.dm.xdb, sql, attrs)
 }
 
 func (r *Result) Count() (int, error) {
 	// FINAL
 	defer r.reset()
 
-	gdb := r.beforeQuery(COUNT)
-	var count int64
-	err := gdb.Count(&count).Error
-	return int(count), err
+	data, attrs := r.beforeQuery()
+	var buff bytes.Buffer
+	if err := r.dm.queryTemplate.Execute(&buff, data); err != nil {
+		return 0, err
+	}
+	sql := buff.String()
+
+	var count int
+	if err := r.dm.xdb.QueryRowx(sql, attrs...).Scan(&count); err != nil {
+		return 0, err
+	}
+
+	return count, nil
 }
 
 func (r *Result) Paginate(pageNum int, pageSize int, dst any) (totalRecords int, totalPages int, err error) {
-	//TODO implement me
-	panic("implement me")
+	// FINAL
+	defer r.reset()
+
+	r.offset = (pageNum - 1) * pageSize
+	r.limit = pageSize
+	if err = r.All(dst); err != nil {
+		return
+	}
+
+	r.offset = 0
+	r.limit = 0
+	totalRecords, err = r.Count()
+	if err != nil {
+		return
+	}
+	totalPages = int(math.Ceil(float64(totalRecords) / float64(pageSize)))
+	return
 }
 
 func (r *Result) Update(doc any) (int, error) {
 	// FINAL
 	defer r.reset()
 
-	gdb := r.beforeQuery(UPDATE)
-	values := r.dm.schema.ParseValue(doc, true)
-	ret := gdb.Updates(values)
-	return int(ret.RowsAffected), ret.Error
+	data, attrs := r.beforeQuery()
+	ruv, err := NewReflectUtils(doc)
+	if err != nil {
+		return 0, err
+	}
+	pairs, err := ruv.GetAllFieldsOrKeysAndValues(ruv.Raw())
+	if err != nil {
+		return 0, err
+	}
+	fields := r.dm.schema.Fields
+	var sets []string
+	for k, v := range pairs {
+		f := fields[k]
+		if f.Valid() && f.NativeName != "" {
+			sets = append(sets, fmt.Sprintf("%s = ?", f.NativeName))
+		} else {
+			sets = append(sets, fmt.Sprintf("%s = ?", k))
+		}
+		attrs = append(attrs, v)
+	}
+	if len(sets) > 0 {
+		data["Sets"] = strings.Join(sets, ", ")
+	}
+	var buff bytes.Buffer
+	if err := r.dm.updateTemplate.Execute(&buff, data); err != nil {
+		return 0, err
+	}
+	sql := buff.String()
+
+	res, err := r.dm.xdb.Exec(sql, attrs...)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
 }
 
 func (r *Result) Delete() (int, error) {
 	// FINAL
 	defer r.reset()
 
-	gdb := r.beforeQuery(DELETE)
-	ret := gdb.Delete(nil)
-	return int(ret.RowsAffected), ret.Error
+	data, attrs := r.beforeQuery()
+	var buff bytes.Buffer
+	if err := r.dm.deleteTemplate.Execute(&buff, data); err != nil {
+		return 0, err
+	}
+	sql := buff.String()
+
+	res, err := r.dm.xdb.Exec(sql, attrs...)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
 }
 
 func (r *Result) reset() {

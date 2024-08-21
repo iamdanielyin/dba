@@ -24,6 +24,7 @@ const (
 )
 
 type ReflectUtils struct {
+	raw          any
 	value        reflect.Value
 	typ          reflect.Type
 	cachedValues sync.Map // 使用 sync.Map 替代普通 map
@@ -35,13 +36,19 @@ func NewReflectUtils(a any) (*ReflectUtils, error) {
 	typ := reflect.TypeOf(a)
 
 	return &ReflectUtils{
+		raw:   a,
 		value: val,
 		typ:   typ,
 	}, nil
 }
 
-// Value 返回原始值
-func (ru *ReflectUtils) Value() any {
+// Raw 返回原始值
+func (ru *ReflectUtils) Raw() any {
+	return ru.raw
+}
+
+// Value 返回反射值
+func (ru *ReflectUtils) Value() reflect.Value {
 	return ru.value
 }
 
