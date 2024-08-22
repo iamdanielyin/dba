@@ -11,17 +11,6 @@ import (
 	"text/template"
 )
 
-type Action string
-
-const (
-	CREATE Action = "CREATE"
-	UPDATE Action = "UPDATE"
-	DELETE Action = "DELETE"
-	ONE    Action = "ONE"
-	ALL    Action = "ALL"
-	COUNT  Action = "COUNT"
-)
-
 type DataModel struct {
 	conn           *Connection
 	schema         *Schema
@@ -251,7 +240,6 @@ func (dm *DataModel) Find(conditions ...any) *Result {
 }
 
 type Result struct {
-	action     Action
 	cache      *sync.Map
 	dm         *DataModel
 	filters    []*Filter
