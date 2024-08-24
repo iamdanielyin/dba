@@ -209,8 +209,9 @@ func (dm *DataModel) insertBatchWithTx(tx *sqlx.Tx, columns []string, vars [][]a
 	if err := dm.createTemplate.Execute(&buff, data); err != nil {
 		return 0, err
 	}
-
 	sql := buff.String()
+	sql = formatSQL(sql)
+
 	var args []any
 	for _, row := range vars {
 		args = append(args, row...)
@@ -571,6 +572,7 @@ func (r *Result) One(dst any) error {
 		return err
 	}
 	sql := buff.String()
+	sql = formatSQL(sql)
 
 	return autoScan(dst, r.dm.xdb, sql, attrs)
 }
@@ -585,6 +587,7 @@ func (r *Result) All(dst any) error {
 		return err
 	}
 	sql := buff.String()
+	sql = formatSQL(sql)
 
 	return autoScan(dst, r.dm.xdb, sql, attrs)
 }
@@ -599,6 +602,7 @@ func (r *Result) Count() (int, error) {
 		return 0, err
 	}
 	sql := buff.String()
+	sql = formatSQL(sql)
 
 	var count int
 	if err := r.dm.xdb.QueryRowx(sql, attrs...).Scan(&count); err != nil {
@@ -660,6 +664,7 @@ func (r *Result) Update(doc any) (int, error) {
 		return 0, err
 	}
 	sql := buff.String()
+	sql = formatSQL(sql)
 
 	res, err := r.dm.xdb.Exec(sql, attrs...)
 	if err != nil {
@@ -679,6 +684,7 @@ func (r *Result) Delete() (int, error) {
 		return 0, err
 	}
 	sql := buff.String()
+	sql = formatSQL(sql)
 
 	res, err := r.dm.xdb.Exec(sql, attrs...)
 	if err != nil {
