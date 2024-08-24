@@ -47,8 +47,9 @@ func (c *Connection) GenDDL(schemas map[string]*Schema, ignoreComments ...bool) 
 	return c.driver.GenDDL(sortedNames, schemas, ignoreComments...)
 }
 
-func (c *Connection) Exec(sql string, values ...any) (int, error) {
-	r, err := c.xdb.Exec(sql, values...)
+func (c *Connection) Exec(query string, args ...any) (int, error) {
+	query = formatSQL(query)
+	r, err := c.xdb.Exec(query, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -58,6 +59,7 @@ func (c *Connection) Exec(sql string, values ...any) (int, error) {
 }
 
 func (c *Connection) BatchExec(query string, args ...any) (int, error) {
+	query = formatSQL(query)
 	tx, err := c.xdb.Begin()
 	if err != nil {
 		return 0, err
@@ -107,4 +109,26 @@ func extractParams(stmt string, params []any, paramIndex int) ([]any, int, error
 	// 提取匹配的参数
 	stmtParams := params[paramIndex : paramIndex+numPlaceholders]
 	return stmtParams, paramIndex + numPlaceholders, nil
+}
+
+func formatSQL(sql string) string {
+	// 正则表达式匹配所有字符串字面量（包括单引号和双引号）
+	re := regexp.MustCompile(`'[^']*'|"[^"]*"`)
+
+	// 用于存储被提取的字符串字面量
+	stringLiterals := re.FindAllString(sql, -1)
+
+	// 替换字符串字面量为占位符
+	placeholderSQL := re.ReplaceAllString(sql, "##STRING_LITERAL##")
+
+	// 对占位符后的 SQL 进行标准化（去除多余空白）
+	standardizedSQL := regexp.MustCompile(`\s+`).ReplaceAllString(placeholderSQL, " ")
+
+	// 依次将原本的字符串字面量替换回去
+	for _, literal := range stringLiterals {
+		standardizedSQL = strings.Replace(standardizedSQL, "##STRING_LITERAL##", literal, 1)
+	}
+
+	// 去除前后的空白字符
+	return strings.TrimSpace(standardizedSQL)
 }
