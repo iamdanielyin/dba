@@ -2,10 +2,16 @@ package dba
 
 import "github.com/jmoiron/sqlx"
 
+const (
+	MySQL      = "mysql"
+	PostgreSQL = "postgres"
+	SQLite     = "sqlite"
+)
+
 var drivers = map[string]Driver{
-	"mysql":    &mysqlDriver{},
-	"postgres": &postgresDriver{},
-	"sqlite":   &sqliteDriver{},
+	MySQL:      &mysqlDriver{},
+	PostgreSQL: &postgresDriver{},
+	SQLite:     &sqliteDriver{},
 }
 
 type Driver interface {

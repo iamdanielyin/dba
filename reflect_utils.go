@@ -1,9 +1,15 @@
 package dba
 
 import (
+	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
+	"github.com/iamdanielyin/structs"
 	"github.com/jinzhu/now"
+	"go/ast"
+	"gorm.io/gorm/clause"
+	"gorm.io/gorm/utils"
 	"reflect"
 	"strconv"
 	"sync"
@@ -25,21 +31,62 @@ const (
 
 type ReflectUtils struct {
 	raw          any
-	value        reflect.Value
-	typ          reflect.Type
+	rawVal       reflect.Value
+	rawTyp       reflect.Type
+	indirectVal  reflect.Value
+	indirectTyp  reflect.Type
+	indirectKind reflect.Kind
+	isArray      bool
+	cat          TypeCategory
 	cachedValues sync.Map // 使用 sync.Map 替代普通 map
 }
 
 // NewReflectUtils 创建一个新的 ReflectUtils 对象
 func NewReflectUtils(a any) (*ReflectUtils, error) {
-	val := reflect.ValueOf(a)
-	typ := reflect.TypeOf(a)
+	rawVal := reflect.ValueOf(a)
+	indirectVal := reflect.Indirect(rawVal)
 
-	return &ReflectUtils{
-		raw:   a,
-		value: val,
-		typ:   typ,
-	}, nil
+	ru := ReflectUtils{
+		raw:          a,
+		rawVal:       rawVal,
+		rawTyp:       rawVal.Type(),
+		indirectVal:  indirectVal,
+		indirectTyp:  indirectVal.Type(),
+		indirectKind: indirectVal.Kind(),
+	}
+	var cat TypeCategory
+	switch ru.indirectKind {
+	case reflect.Struct:
+		cat = CategoryStruct
+	case reflect.Map:
+		if ru.indirectTyp.Key().Kind() == reflect.String && ru.indirectTyp.Elem().Kind() == reflect.Interface {
+			cat = CategoryMapStringAny
+		}
+	case reflect.Slice, reflect.Array:
+		elemType := ru.indirectTyp.Elem()
+		switch elemType.Kind() {
+		case reflect.Struct:
+			cat = CategoryStructSliceOrArray
+			ru.isArray = true
+		case reflect.Ptr:
+			if elemType.Elem().Kind() == reflect.Struct {
+				cat = CategoryStructPointerSliceOrArray
+				ru.isArray = true
+			}
+		case reflect.Map:
+			if elemType.Key().Kind() == reflect.String && elemType.Elem().Kind() == reflect.Interface {
+				cat = CategoryMapStringAnyPointerSliceOrArray
+				ru.isArray = true
+			}
+		default:
+			cat = CategoryUnknown
+		}
+	default:
+		cat = CategoryUnknown
+	}
+
+	ru.cat = cat
+	return &ru, nil
 }
 
 // Raw 返回原始值
@@ -49,286 +96,466 @@ func (ru *ReflectUtils) Raw() any {
 
 // Value 返回反射值
 func (ru *ReflectUtils) Value() reflect.Value {
-	return ru.value
+	return ru.rawVal
+}
+
+// IndirectVal 返回反射值
+func (ru *ReflectUtils) IndirectVal() reflect.Value {
+	return ru.indirectVal
 }
 
 // TypeCategory 返回变量的类型类别
 func (ru *ReflectUtils) TypeCategory() TypeCategory {
-	switch ru.typ.Kind() {
-	case reflect.Struct:
-		return CategoryStruct
-	case reflect.Ptr:
-		if ru.typ.Elem().Kind() == reflect.Struct {
-			return CategoryStructPointer
-		}
-	case reflect.Map:
-		if ru.typ.Key().Kind() == reflect.String && ru.typ.Elem().Kind() == reflect.Interface {
-			return CategoryMapStringAny
-		}
-	case reflect.Slice, reflect.Array:
-		elemType := ru.typ.Elem()
-		switch elemType.Kind() {
-		case reflect.Struct:
-			return CategoryStructSliceOrArray
-		case reflect.Ptr:
-			if elemType.Elem().Kind() == reflect.Struct {
-				return CategoryStructPointerSliceOrArray
-			}
-		case reflect.Map:
-			if elemType.Key().Kind() == reflect.String && elemType.Elem().Kind() == reflect.Interface {
-				return CategoryMapStringAnyPointerSliceOrArray
-			}
-		}
-	}
-	return CategoryUnknown
+	return ru.cat
 }
 
 // CreateEmptyElement 返回切片或数组元素的空值对象
 func (ru *ReflectUtils) CreateEmptyElement() (any, error) {
-	elemType := ru.typ
+	if ru.isArray {
+		elemType := ru.indirectTyp.Elem()
 
-	// 如果是切片或数组，获取元素类型
-	if ru.typ.Kind() == reflect.Slice || ru.typ.Kind() == reflect.Array {
-		elemType = ru.typ.Elem()
-	}
-
-	// 根据元素类型创建相应的空值对象
-	switch elemType.Kind() {
-	case reflect.Struct:
-		return reflect.New(elemType).Elem().Interface(), nil
-	case reflect.Ptr:
-		if elemType.Elem().Kind() == reflect.Struct {
-			return reflect.New(elemType.Elem()).Interface(), nil
+		// 根据元素类型创建相应的空值对象
+		switch elemType.Kind() {
+		case reflect.Struct:
+			return reflect.New(elemType).Elem().Interface(), nil
+		case reflect.Ptr:
+			if elemType.Elem().Kind() == reflect.Struct {
+				return reflect.New(elemType.Elem()).Interface(), nil
+			}
+		case reflect.Map:
+			if elemType.Key().Kind() == reflect.String && elemType.Elem().Kind() == reflect.Interface {
+				return reflect.MakeMap(elemType).Interface(), nil
+			}
+		default:
+			return reflect.Zero(elemType).Interface(), nil
 		}
-	case reflect.Map:
-		if elemType.Key().Kind() == reflect.String && elemType.Elem().Kind() == reflect.Interface {
-			return reflect.MakeMap(elemType).Interface(), nil
-		}
-	default:
-		return reflect.Zero(elemType).Interface(), nil
 	}
 
 	return nil, fmt.Errorf("未知的元素类型")
 }
 
-// Clone 返回变量a的完整副本
-func (ru *ReflectUtils) Clone() any {
-	return reflect.Indirect(reflect.New(ru.typ)).Interface()
-}
-
 // CreateEmptyCopy 创建变量a的空副本
 func (ru *ReflectUtils) CreateEmptyCopy() any {
-	if ru.typ.Kind() == reflect.Slice {
-		return reflect.MakeSlice(ru.typ, 0, 0).Interface()
-	} else if ru.typ.Kind() == reflect.Array {
-		return reflect.New(ru.typ).Elem().Interface()
+	// 如果是指针类型，使用 reflect.New 创建一个相同类型的新指针
+	if ru.rawTyp.Kind() == reflect.Ptr {
+		// 使用 reflect.New 创建一个指向该类型的新指针
+		newPtr := reflect.New(ru.rawTyp.Elem())
+		return newPtr.Interface()
 	}
-	return nil
+
+	// 如果不是指针类型，直接创建一个相同类型的新值
+	newVal := reflect.New(ru.rawTyp).Elem()
+	return newVal.Interface()
 }
 
 // GetLen 获取数组或切片长度
 func (ru *ReflectUtils) GetLen() (int, error) {
-	if ru.typ.Kind() != reflect.Slice && ru.typ.Kind() != reflect.Array {
-		return 0, fmt.Errorf("变量a不是切片或数组类型")
+	if ru.isArray {
+		return ru.indirectVal.Len(), nil
 	}
-	return ru.value.Len(), nil
+	return 0, fmt.Errorf("变量a不是切片或数组类型")
 }
 
 // GetElement 获取指定下标的元素
 func (ru *ReflectUtils) GetElement(index int) (any, error) {
-	if ru.typ.Kind() != reflect.Slice && ru.typ.Kind() != reflect.Array {
-		return nil, fmt.Errorf("变量a不是切片或数组类型")
+	if ru.isArray {
+		if index < 0 || index >= ru.indirectVal.Len() {
+			return nil, fmt.Errorf("索引超出范围")
+		}
+		return ru.indirectVal.Index(index).Interface(), nil
 	}
-	if index < 0 || index >= ru.value.Len() {
-		return nil, fmt.Errorf("索引超出范围")
-	}
-	return ru.value.Index(index).Interface(), nil
+	return nil, fmt.Errorf("变量a不是切片或数组类型")
 }
 
-// getFieldReflectValue 获取指定字段的 reflect.Value。
-// 如果字段是指针类型且为空，则创建新实例并解引用。
-// 如果字段不存在或无效，则返回错误。
-// 支持嵌套结构体的递归获取。
-func getFieldReflectValue(v reflect.Value, fieldName string) (reflect.Value, error) {
+// getStructField 获取指定字段的 reflect.StructField
+func getStructField(v reflect.Value, fieldName string) (reflect.StructField, error) {
 	v = reflect.Indirect(v) // 解引用指针，以获取实际值而非指针本身
 	for v.Kind() == reflect.Struct {
-		fieldVal := v.FieldByName(fieldName)
-		if !fieldVal.IsValid() {
-			return reflect.Value{}, fmt.Errorf("字段%s不存在", fieldName)
-		}
-		if fieldVal.Kind() == reflect.Ptr {
-			if fieldVal.IsNil() {
-				fieldVal.Set(reflect.New(fieldVal.Type().Elem())) // 如果指针为空，创建新实例
+		modelType := v.Type()
+		for i := 0; i < modelType.NumField(); i++ {
+			if fieldStruct := modelType.Field(i); ast.IsExported(fieldStruct.Name) && fieldStruct.Name == fieldName {
+				return fieldStruct, nil
 			}
-			v = fieldVal.Elem() // 继续解引用指针
-		} else {
-			return fieldVal, nil
 		}
 	}
-	return reflect.Value{}, fmt.Errorf("字段%s无法获取值", fieldName)
+	return reflect.StructField{}, fmt.Errorf("字段%s无法获取值", fieldName)
 }
 
 // GetFieldOrKey 获取指定结构体字段或 map 键的值。
 // 如果是结构体，将尝试获取字段的 reflect.Value 并返回其 Interface()。
 // 如果是 map，将尝试获取指定键的值。
 // 如果字段或键不存在，或类型不支持，返回错误。
-func (ru *ReflectUtils) GetFieldOrKey(elem any, name string) (any, error) {
-	val := reflect.ValueOf(elem)
+func (ru *ReflectUtils) GetFieldOrKey(elem any, k string) (result any, isEmpty bool) {
+	isEmpty = true
 
-	switch val.Kind() {
+	value := reflect.ValueOf(elem)
+
+	switch value.Kind() {
 	case reflect.Struct, reflect.Ptr:
 		// 获取目标字段的 reflect.Value
-		fieldVal, err := getFieldReflectValue(val, name)
+		structField, err := getStructField(value, k)
 		if err != nil {
-			return nil, err
+			return
 		}
-		return fieldVal.Interface(), nil
+		fieldIndex := structField.Index[0]
+		if len(structField.Index) == 1 && fieldIndex > 0 {
+			fieldValue := reflect.Indirect(value).Field(fieldIndex)
+			result, isEmpty = fieldValue.Interface(), fieldValue.IsZero()
+		} else {
+			v := reflect.Indirect(value)
+			for _, fieldIdx := range structField.Index {
+				if fieldIdx >= 0 {
+					v = v.Field(fieldIdx)
+				} else {
+					v = v.Field(-fieldIdx - 1)
 
+					if !v.IsNil() {
+						v = v.Elem()
+					} else {
+						return nil, isEmpty
+					}
+				}
+			}
+
+			result, isEmpty = v.Interface(), v.IsZero()
+		}
 	case reflect.Map:
 		// 处理 map 类型，通过键名获取对应的值
-		keyVal := val.MapIndex(reflect.ValueOf(name))
+		keyVal := value.MapIndex(reflect.ValueOf(k))
 		if !keyVal.IsValid() {
-			return nil, fmt.Errorf("键%s不存在", name)
+			return
 		}
-		return keyVal.Interface(), nil
+		result, isEmpty = keyVal.Interface(), keyVal.IsZero()
+	default:
 	}
 
-	return nil, fmt.Errorf("不支持的类型")
+	return
 }
 
 // SetFieldOrKey 设置指定结构体字段或 map 键的值。
 // 对于结构体类型，尝试获取字段的 reflect.Value 并设置新值。
 // 对于 map 类型，通过键名设置对应的值。
 // 如果字段不可设置或类型不支持，返回错误。
-func (ru *ReflectUtils) SetFieldOrKey(elem any, name string, value any) error {
-	val := reflect.ValueOf(elem)
+func (ru *ReflectUtils) SetFieldOrKey(elem any, k string, v any) (err error) {
+	value := reflect.ValueOf(elem)
 
-	switch val.Kind() {
+	switch value.Kind() {
 	case reflect.Struct, reflect.Ptr:
 		// 获取目标字段的 reflect.Value
-		fieldVal, err := getFieldReflectValue(val, name)
-		if err != nil {
-			return err
+		structField, e := getStructField(value, k)
+		if e != nil {
+			return e
 		}
-
-		if !fieldVal.CanSet() {
-			return fmt.Errorf("字段%s不可设置", name)
-		}
-
-		// 根据字段类型进行相应的设置操作
-		switch fieldVal.Kind() {
+		ctx := context.Background()
+		// Set
+		switch structField.Type.Kind() {
 		case reflect.Bool:
-			if data, ok := value.(bool); ok {
-				fieldVal.SetBool(data)
-				return nil
-			} else if data, ok := value.(string); ok {
+			switch data := v.(type) {
+			case **bool:
+				if data != nil && *data != nil {
+					ReflectValueOf(ctx, structField, value).SetBool(**data)
+				}
+			case bool:
+				ReflectValueOf(ctx, structField, value).SetBool(data)
+			case int64:
+				ReflectValueOf(ctx, structField, value).SetBool(data > 0)
+			case string:
 				b, _ := strconv.ParseBool(data)
-				fieldVal.SetBool(b)
-				return nil
+				ReflectValueOf(ctx, structField, value).SetBool(b)
+			default:
+				err = fallbackSetter(ctx, structField, value, v)
 			}
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			if data, ok := value.(int64); ok {
-				fieldVal.SetInt(data)
-				return nil
-			} else if data, ok := value.(string); ok {
-				if i, err := strconv.ParseInt(data, 0, 64); err == nil {
-					fieldVal.SetInt(i)
-					return nil
-				} else {
-					return err
+			switch data := v.(type) {
+			case **int64:
+				if data != nil && *data != nil {
+					ReflectValueOf(ctx, structField, value).SetInt(**data)
 				}
+			case **int:
+				if data != nil && *data != nil {
+					ReflectValueOf(ctx, structField, value).SetInt(int64(**data))
+				}
+			case **int8:
+				if data != nil && *data != nil {
+					ReflectValueOf(ctx, structField, value).SetInt(int64(**data))
+				}
+			case **int16:
+				if data != nil && *data != nil {
+					ReflectValueOf(ctx, structField, value).SetInt(int64(**data))
+				}
+			case **int32:
+				if data != nil && *data != nil {
+					ReflectValueOf(ctx, structField, value).SetInt(int64(**data))
+				}
+			case int64:
+				ReflectValueOf(ctx, structField, value).SetInt(data)
+			case int:
+				ReflectValueOf(ctx, structField, value).SetInt(int64(data))
+			case int8:
+				ReflectValueOf(ctx, structField, value).SetInt(int64(data))
+			case int16:
+				ReflectValueOf(ctx, structField, value).SetInt(int64(data))
+			case int32:
+				ReflectValueOf(ctx, structField, value).SetInt(int64(data))
+			case uint:
+				ReflectValueOf(ctx, structField, value).SetInt(int64(data))
+			case uint8:
+				ReflectValueOf(ctx, structField, value).SetInt(int64(data))
+			case uint16:
+				ReflectValueOf(ctx, structField, value).SetInt(int64(data))
+			case uint32:
+				ReflectValueOf(ctx, structField, value).SetInt(int64(data))
+			case uint64:
+				ReflectValueOf(ctx, structField, value).SetInt(int64(data))
+			case float32:
+				ReflectValueOf(ctx, structField, value).SetInt(int64(data))
+			case float64:
+				ReflectValueOf(ctx, structField, value).SetInt(int64(data))
+			case []byte:
+				// field.Set(ctx, value, string(data))
+			case string:
+				if i, err := strconv.ParseInt(data, 0, 64); err == nil {
+					ReflectValueOf(ctx, structField, value).SetInt(i)
+				}
+			case time.Time:
+				ReflectValueOf(ctx, structField, value).SetInt(data.UnixNano())
+			case *time.Time:
+				if data != nil {
+					ReflectValueOf(ctx, structField, value).SetInt(data.UnixNano())
+				} else {
+					ReflectValueOf(ctx, structField, value).SetInt(0)
+				}
+			default:
+				err = fallbackSetter(ctx, structField, value, v)
 			}
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			if data, ok := value.(uint64); ok {
-				fieldVal.SetUint(data)
-				return nil
-			} else if data, ok := value.(string); ok {
-				if i, err := strconv.ParseUint(data, 0, 64); err == nil {
-					fieldVal.SetUint(i)
-					return nil
-				} else {
-					return err
+			switch data := v.(type) {
+			case **uint64:
+				if data != nil && *data != nil {
+					ReflectValueOf(ctx, structField, value).SetUint(**data)
 				}
+			case **uint:
+				if data != nil && *data != nil {
+					ReflectValueOf(ctx, structField, value).SetUint(uint64(**data))
+				}
+			case **uint8:
+				if data != nil && *data != nil {
+					ReflectValueOf(ctx, structField, value).SetUint(uint64(**data))
+				}
+			case **uint16:
+				if data != nil && *data != nil {
+					ReflectValueOf(ctx, structField, value).SetUint(uint64(**data))
+				}
+			case **uint32:
+				if data != nil && *data != nil {
+					ReflectValueOf(ctx, structField, value).SetUint(uint64(**data))
+				}
+			case uint64:
+				ReflectValueOf(ctx, structField, value).SetUint(data)
+			case uint:
+				ReflectValueOf(ctx, structField, value).SetUint(uint64(data))
+			case uint8:
+				ReflectValueOf(ctx, structField, value).SetUint(uint64(data))
+			case uint16:
+				ReflectValueOf(ctx, structField, value).SetUint(uint64(data))
+			case uint32:
+				ReflectValueOf(ctx, structField, value).SetUint(uint64(data))
+			case int64:
+				ReflectValueOf(ctx, structField, value).SetUint(uint64(data))
+			case int:
+				ReflectValueOf(ctx, structField, value).SetUint(uint64(data))
+			case int8:
+				ReflectValueOf(ctx, structField, value).SetUint(uint64(data))
+			case int16:
+				ReflectValueOf(ctx, structField, value).SetUint(uint64(data))
+			case int32:
+				ReflectValueOf(ctx, structField, value).SetUint(uint64(data))
+			case float32:
+				ReflectValueOf(ctx, structField, value).SetUint(uint64(data))
+			case float64:
+				ReflectValueOf(ctx, structField, value).SetUint(uint64(data))
+			case []byte:
+				// field.Set(ctx, value, string(data))
+			case time.Time:
+				ReflectValueOf(ctx, structField, value).SetUint(uint64(data.UnixNano()))
+			case string:
+				if i, err := strconv.ParseUint(data, 0, 64); err == nil {
+					ReflectValueOf(ctx, structField, value).SetUint(i)
+				}
+			default:
+				err = fallbackSetter(ctx, structField, value, v)
 			}
 		case reflect.Float32, reflect.Float64:
-			if data, ok := value.(float64); ok {
-				fieldVal.SetFloat(data)
-				return nil
-			} else if data, ok := value.(string); ok {
-				if f, err := strconv.ParseFloat(data, 64); err == nil {
-					fieldVal.SetFloat(f)
-					return nil
-				} else {
-					return err
+			switch data := v.(type) {
+			case **float64:
+				if data != nil && *data != nil {
+					ReflectValueOf(ctx, structField, value).SetFloat(**data)
 				}
+			case **float32:
+				if data != nil && *data != nil {
+					ReflectValueOf(ctx, structField, value).SetFloat(float64(**data))
+				}
+			case float64:
+				ReflectValueOf(ctx, structField, value).SetFloat(data)
+			case float32:
+				ReflectValueOf(ctx, structField, value).SetFloat(float64(data))
+			case int64:
+				ReflectValueOf(ctx, structField, value).SetFloat(float64(data))
+			case int:
+				ReflectValueOf(ctx, structField, value).SetFloat(float64(data))
+			case int8:
+				ReflectValueOf(ctx, structField, value).SetFloat(float64(data))
+			case int16:
+				ReflectValueOf(ctx, structField, value).SetFloat(float64(data))
+			case int32:
+				ReflectValueOf(ctx, structField, value).SetFloat(float64(data))
+			case uint:
+				ReflectValueOf(ctx, structField, value).SetFloat(float64(data))
+			case uint8:
+				ReflectValueOf(ctx, structField, value).SetFloat(float64(data))
+			case uint16:
+				ReflectValueOf(ctx, structField, value).SetFloat(float64(data))
+			case uint32:
+				ReflectValueOf(ctx, structField, value).SetFloat(float64(data))
+			case uint64:
+				ReflectValueOf(ctx, structField, value).SetFloat(float64(data))
+			case []byte:
+				// field.Set(ctx, value, string(data))
+			case string:
+				if i, err := strconv.ParseFloat(data, 64); err == nil {
+					ReflectValueOf(ctx, structField, value).SetFloat(i)
+				}
+			default:
+				err = fallbackSetter(ctx, structField, value, v)
 			}
 		case reflect.String:
-			if data, ok := value.(string); ok {
-				fieldVal.SetString(data)
-				return nil
-			}
-		case reflect.Struct:
-			// 处理 time.Time 类型
-			if fieldVal.Type() == reflect.TypeOf(time.Time{}) {
-				if data, ok := value.(time.Time); ok {
-					fieldVal.Set(reflect.ValueOf(data))
-					return nil
-				} else if data, ok := value.(string); ok {
-					if t, err := now.Parse(data); err == nil {
-						fieldVal.Set(reflect.ValueOf(t))
-						return nil
-					} else {
-						return fmt.Errorf("无法将值 %v 设置为 time.Time 类型字段 %s: %v", value, name, err)
-					}
+			switch data := v.(type) {
+			case **string:
+				if data != nil && *data != nil {
+					ReflectValueOf(ctx, structField, value).SetString(**data)
 				}
+			case string:
+				ReflectValueOf(ctx, structField, value).SetString(data)
+			case []byte:
+				ReflectValueOf(ctx, structField, value).SetString(string(data))
+			case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+				ReflectValueOf(ctx, structField, value).SetString(utils.ToString(data))
+			case float64, float32:
+				ReflectValueOf(ctx, structField, value).SetString(fmt.Sprintf("%."+strconv.Itoa(0)+"f", data))
+			default:
+				err = fallbackSetter(ctx, structField, value, v)
 			}
-		case reflect.Ptr:
-			// 处理指针类型，创建新的实例并解引用设置值
-			if fieldVal.IsNil() {
-				fieldVal.Set(reflect.New(fieldVal.Type().Elem()))
-			}
-			if reflect.TypeOf(value).AssignableTo(fieldVal.Type().Elem()) {
-				fieldVal.Elem().Set(reflect.ValueOf(value))
-				return nil
-			} else if reflect.TypeOf(value).ConvertibleTo(fieldVal.Type().Elem()) {
-				fieldVal.Elem().Set(reflect.ValueOf(value).Convert(fieldVal.Type().Elem()))
-				return nil
-			}
-			// 处理指向时间类型的指针
-			if fieldVal.Type() == reflect.TypeOf(&time.Time{}) {
-				if data, ok := value.(*time.Time); ok {
-					fieldVal.Set(reflect.ValueOf(data))
-					return nil
-				} else if data, ok := value.(string); ok {
+		default:
+			fieldValue := reflect.New(structField.Type)
+			switch fieldValue.Elem().Interface().(type) {
+			case time.Time:
+				switch data := v.(type) {
+				case **time.Time:
+					//if data != nil && *data != nil {
+					//	field.Set(ctx, value, *data)
+					//}
+				case time.Time:
+					ReflectValueOf(ctx, structField, value).Set(reflect.ValueOf(v))
+				case *time.Time:
+					if data != nil {
+						ReflectValueOf(ctx, structField, value).Set(reflect.ValueOf(data).Elem())
+					} else {
+						ReflectValueOf(ctx, structField, value).Set(reflect.ValueOf(time.Time{}))
+					}
+				case string:
 					if t, err := now.Parse(data); err == nil {
-						fieldVal.Set(reflect.ValueOf(&t))
+						ReflectValueOf(ctx, structField, value).Set(reflect.ValueOf(t))
+					} else {
+						err = fmt.Errorf("failed to set string %v to time.Time field %s, failed to parse it as time, got error %v", v, k, err)
+					}
+				default:
+					err = fallbackSetter(ctx, structField, value, v)
+				}
+			case *time.Time:
+				switch data := v.(type) {
+				case **time.Time:
+					if data != nil && *data != nil {
+						ReflectValueOf(ctx, structField, value).Set(reflect.ValueOf(*data))
+					}
+				case time.Time:
+					fieldValue := ReflectValueOf(ctx, structField, value)
+					if fieldValue.IsNil() {
+						fieldValue.Set(reflect.New(structField.Type.Elem()))
+					}
+					fieldValue.Elem().Set(reflect.ValueOf(v))
+				case *time.Time:
+					ReflectValueOf(ctx, structField, value).Set(reflect.ValueOf(v))
+				case string:
+					if t, err := now.Parse(data); err == nil {
+						fieldValue := ReflectValueOf(ctx, structField, value)
+						if fieldValue.IsNil() {
+							if v == "" {
+								return nil
+							}
+							fieldValue.Set(reflect.New(structField.Type.Elem()))
+						}
+						fieldValue.Elem().Set(reflect.ValueOf(t))
+					} else {
+						err = fmt.Errorf("failed to set string %v to time.Time field %s, failed to parse it as time, got error %v", v, k, err)
+					}
+				default:
+					err = fallbackSetter(ctx, structField, value, v)
+				}
+			default:
+				if _, ok := fieldValue.Elem().Interface().(sql.Scanner); ok {
+					// pointer scanner
+					reflectV := reflect.ValueOf(v)
+					if !reflectV.IsValid() {
+						ReflectValueOf(ctx, structField, value).Set(reflect.New(structField.Type).Elem())
+					} else if reflectV.Kind() == reflect.Ptr && reflectV.IsNil() {
+						return nil
+					} else if reflectV.Type().AssignableTo(structField.Type) {
+						ReflectValueOf(ctx, structField, value).Set(reflectV)
+					} else if reflectV.Kind() == reflect.Ptr {
+						//return field.Set(ctx, value, reflectV.Elem().Interface())
 						return nil
 					} else {
-						return fmt.Errorf("无法将值 %v 设置为 *time.Time 类型字段 %s: %v", value, name, err)
+						fieldValue := ReflectValueOf(ctx, structField, value)
+						if fieldValue.IsNil() {
+							fieldValue.Set(reflect.New(structField.Type.Elem()))
+						}
+
+						if valuer, ok := v.(driver.Valuer); ok {
+							v, _ = valuer.Value()
+						}
+
+						err = fieldValue.Interface().(sql.Scanner).Scan(v)
 					}
+				} else if _, ok := fieldValue.Interface().(sql.Scanner); ok {
+					// struct scanner
+					reflectV := reflect.ValueOf(v)
+					if !reflectV.IsValid() {
+						ReflectValueOf(ctx, structField, value).Set(reflect.New(structField.Type).Elem())
+					} else if reflectV.Kind() == reflect.Ptr && reflectV.IsNil() {
+						return nil
+					} else if reflectV.Type().AssignableTo(structField.Type) {
+						ReflectValueOf(ctx, structField, value).Set(reflectV)
+					} else if reflectV.Kind() == reflect.Ptr {
+						//return field.Set(ctx, value, reflectV.Elem().Interface())
+						return nil
+					} else {
+						if valuer, ok := v.(driver.Valuer); ok {
+							v, _ = valuer.Value()
+						}
+
+						err = ReflectValueOf(ctx, structField, value).Addr().Interface().(sql.Scanner).Scan(v)
+					}
+				} else {
+					err = fallbackSetter(ctx, structField, value, v)
 				}
 			}
 		}
-
-		// 序列化与扫描器处理
-		if scanner, ok := fieldVal.Addr().Interface().(sql.Scanner); ok {
-			if err := scanner.Scan(value); err != nil {
-				return fmt.Errorf("无法将值 %v 扫描到字段 %s: %v", value, name, err)
-			}
-			return nil
-		}
-
-		// 如果没有匹配到特殊类型，使用默认的 Set 方式
-		fieldVal.Set(reflect.ValueOf(value))
-		return nil
-
 	case reflect.Map:
 		// 处理 map 类型，通过键名设置对应的值
-		val.SetMapIndex(reflect.ValueOf(name), reflect.ValueOf(value))
-		return nil
+		value.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(value))
 	}
 
-	return fmt.Errorf("不支持的类型")
+	return
 }
 
 // GetAllFieldNamesOrKeys 获取所有字段名或键名
@@ -388,9 +615,10 @@ func (ru *ReflectUtils) GetAllFieldsOrKeysAndValues(elem any) (map[string]any, e
 
 	switch val.Kind() {
 	case reflect.Struct:
-		for i := 0; i < val.NumField(); i++ {
-			field := val.Type().Field(i)
-			result[field.Name] = val.Field(i).Interface()
+		for _, f := range structs.New(elem).Fields() {
+			if f.IsExported() && !f.IsZero() {
+				result[f.Name()] = f.Value()
+			}
 		}
 	case reflect.Ptr:
 		if val.Elem().Kind() == reflect.Struct {
@@ -405,4 +633,82 @@ func (ru *ReflectUtils) GetAllFieldsOrKeysAndValues(elem any) (map[string]any, e
 	}
 
 	return result, nil
+}
+
+func ReflectValueOf(ctx context.Context, structField reflect.StructField, structValue reflect.Value) reflect.Value {
+	if len(structField.Index) == 1 && structField.Index[0] > 0 {
+		return reflect.Indirect(structValue).Field(structField.Index[0])
+	} else {
+		v := reflect.Indirect(structValue)
+		for idx, fieldIdx := range structField.Index {
+			if fieldIdx >= 0 {
+				v = v.Field(fieldIdx)
+			} else {
+				v = v.Field(-fieldIdx - 1)
+
+				if v.IsNil() {
+					v.Set(reflect.New(v.Type().Elem()))
+				}
+
+				if idx < len(structField.Index)-1 {
+					v = v.Elem()
+				}
+			}
+		}
+		return v
+	}
+}
+
+func fallbackSetter(ctx context.Context, structField reflect.StructField, value reflect.Value, v any) (err error) {
+	if v == nil {
+		ReflectValueOf(ctx, structField, value).Set(reflect.New(structField.Type).Elem())
+	} else {
+		reflectV := reflect.ValueOf(v)
+		// Optimal value type acquisition for v
+		reflectValType := reflectV.Type()
+
+		if reflectValType.AssignableTo(structField.Type) {
+			if reflectV.Kind() == reflect.Ptr && reflectV.Elem().Kind() == reflect.Ptr {
+				reflectV = reflect.Indirect(reflectV)
+			}
+			ReflectValueOf(ctx, structField, value).Set(reflectV)
+			return
+		} else if reflectValType.ConvertibleTo(structField.Type) {
+			ReflectValueOf(ctx, structField, value).Set(reflectV.Convert(structField.Type))
+			return
+		} else if structField.Type.Kind() == reflect.Ptr {
+			fieldValue := ReflectValueOf(ctx, structField, value)
+			fieldType := structField.Type.Elem()
+
+			if reflectValType.AssignableTo(fieldType) {
+				if !fieldValue.IsValid() {
+					fieldValue = reflect.New(fieldType)
+				} else if fieldValue.IsNil() {
+					fieldValue.Set(reflect.New(fieldType))
+				}
+				fieldValue.Elem().Set(reflectV)
+				return
+			} else if reflectValType.ConvertibleTo(fieldType) {
+				if fieldValue.IsNil() {
+					fieldValue.Set(reflect.New(fieldType))
+				}
+
+				fieldValue.Elem().Set(reflectV.Convert(fieldType))
+				return
+			}
+		}
+
+		if reflectV.Kind() == reflect.Ptr {
+			if reflectV.IsNil() {
+				ReflectValueOf(ctx, structField, value).Set(reflect.New(structField.Type).Elem())
+			} else if reflectV.Type().Elem().AssignableTo(structField.Type) {
+				ReflectValueOf(ctx, structField, value).Set(reflectV.Elem())
+				return
+			}
+		} else if _, ok := v.(clause.Expr); !ok {
+			return fmt.Errorf("failed to set value %#v to field %s", v, structField.Name)
+		}
+	}
+
+	return
 }

@@ -7,16 +7,8 @@ var DefaultNamespace = &Namespace{
 	schemas:     new(sync.Map),
 }
 
-func Connect(drv, dsn string, config ...*ConnectConfig) error {
-	var c *ConnectConfig
-	if len(config) > 0 && config[0] != nil {
-		c = config[0]
-	} else {
-		c = new(ConnectConfig)
-	}
-	c.Driver = drv
-	c.Dsn = dsn
-	_, err := DefaultNamespace.Connect(c)
+func Connect(config *ConnectConfig) error {
+	_, err := DefaultNamespace.Connect(config)
 	return err
 }
 

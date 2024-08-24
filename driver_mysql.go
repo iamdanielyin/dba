@@ -129,7 +129,7 @@ func (m *mysqlDriver) QueryClauses() string {
 			FROM {{.Table}}
 			{{if .Where}}
 			WHERE {{.Where}}
-			{{end}
+			{{end}}
 			{{if .GroupBys}}
 			GROUP BY {{.GroupBys}}
 			{{end}}

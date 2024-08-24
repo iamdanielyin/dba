@@ -218,7 +218,7 @@ type Field struct {
 }
 
 func (f *Field) Valid() bool {
-	return f.Type != ""
+	return f != nil && f.Type != ""
 }
 
 func (f *Field) IsScalarType() bool {

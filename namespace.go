@@ -15,9 +15,9 @@ type Namespace struct {
 }
 
 type ConnectConfig struct {
-	Name          string
 	Driver        string
 	Dsn           string
+	Name          string
 	CreateClauses string
 	DeleteClauses string
 	UpdateClauses string

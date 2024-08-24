@@ -9,9 +9,13 @@ import (
 )
 
 func main() {
-	if err := dba.Connect(dba.MYSQL, os.Getenv("MYSQL")); err != nil {
+	if err := dba.Connect(&dba.ConnectConfig{
+		Driver: dba.MySQL,
+		Dsn:    os.Getenv("MYSQL"),
+	}); err != nil {
 		log.Fatal(err)
 	}
+
 	err := dba.RegisterSchema(
 		&examples.Role{},
 		&examples.Permission{},

@@ -326,14 +326,13 @@ func (r *Result) orderBy(isDesc bool, names []string) *Result {
 }
 
 func parseWhere(schema *Schema, filters []*Filter) (string, []any) {
-	nativeFields := schema.NativeFields()
 
 	if len(filters) > 0 {
 		var setItem func(filterOperator, []*Filter) (string, []any)
 		setItem = func(sfo filterOperator, sfs []*Filter) (string, []any) {
 			var (
-				sqls  []string
-				attrs []any
+				clauses []string
+				attrs   []any
 			)
 			for _, item := range sfs {
 				if item == nil {
@@ -354,7 +353,7 @@ func parseWhere(schema *Schema, filters []*Filter) (string, []any) {
 					entryList := item.entryList.([]*Entry)
 					for _, entry := range entryList {
 						key := entry.Key
-						field := nativeFields[key]
+						field := schema.Fields[key]
 						if field.Valid() && field.NativeName != "" {
 							key = field.NativeName
 						}
@@ -422,10 +421,10 @@ func parseWhere(schema *Schema, filters []*Filter) (string, []any) {
 					}
 					if item.operator == filterOperatorOr {
 						s := fmt.Sprintf(format, strings.Join(subSQLs, " OR "))
-						sqls = append(sqls, s)
+						clauses = append(clauses, s)
 					} else {
 						s := fmt.Sprintf(format, strings.Join(subSQLs, " AND "))
-						sqls = append(sqls, s)
+						clauses = append(clauses, s)
 					}
 					if len(subAttrs) > 0 {
 						attrs = append(attrs, subAttrs...)
@@ -434,14 +433,14 @@ func parseWhere(schema *Schema, filters []*Filter) (string, []any) {
 			}
 
 			sfoFormat := "%s"
-			if len(sqls) > 1 {
+			if len(clauses) > 1 {
 				sfoFormat = "(%s)"
 			}
 			if sfo == filterOperatorOr {
-				s := fmt.Sprintf(sfoFormat, strings.Join(sqls, " OR "))
+				s := fmt.Sprintf(sfoFormat, strings.Join(clauses, " OR "))
 				return s, attrs
 			} else {
-				s := fmt.Sprintf(sfoFormat, strings.Join(sqls, " AND "))
+				s := fmt.Sprintf(sfoFormat, strings.Join(clauses, " AND "))
 				return s, attrs
 			}
 		}
@@ -451,11 +450,9 @@ func parseWhere(schema *Schema, filters []*Filter) (string, []any) {
 }
 
 func parseOrderBys(schema *Schema, orderBys map[string]bool) (string, []any) {
-	nativeFields := schema.NativeFields()
-
 	var clauses []string
 	for key, val := range orderBys {
-		if f := nativeFields[key]; f.Valid() && f.NativeName != "" {
+		if f := schema.Fields[key]; f.Valid() && f.NativeName != "" {
 			key = f.NativeName
 		}
 		if val {
@@ -483,9 +480,11 @@ func (r *Result) beforeQuery() (map[string]any, []any) {
 		attrs = append(attrs, orderByAttrs...)
 	}
 	data := map[string]any{
-		"Table":    r.dm.schema.NativeName,
-		"Where":    whereClause,
-		"GroupBys": orderByClause,
+		"Table": r.dm.schema.NativeName,
+		"Where": whereClause,
+	}
+	if orderByClause != "" {
+		data["GroupBys"] = orderByClause
 	}
 
 	// 设置limit
@@ -556,7 +555,7 @@ func autoScan(dst any, xdb *sqlx.DB, sql string, attrs []any) error {
 				sliceValue = reflect.Append(sliceValue, elemValue)
 			}
 		}
-		ruv.Value().Set(sliceValue)
+		ruv.IndirectVal().Set(sliceValue)
 	}
 
 	return nil

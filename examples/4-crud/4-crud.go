@@ -4,12 +4,14 @@ import (
 	"github.com/iamdanielyin/dba"
 	"github.com/iamdanielyin/dba/examples"
 	"log"
+	"os"
 	"time"
 )
 
 func main() {
-	if err := dba.Connect(dba.SQLITE, "./test.db", &dba.ConnectConfig{
-		ShowSQL: true,
+	if err := dba.Connect(&dba.ConnectConfig{
+		Driver: dba.MySQL,
+		Dsn:    os.Getenv("MYSQL"),
 	}); err != nil {
 		log.Fatal(err)
 	}
@@ -31,16 +33,17 @@ func main() {
 	Permission := dba.Model("Permission")
 
 	// create
-	if err = Permission.Create(&examples.Permission{
+	doc := examples.Permission{
 		Code: time.Now().Format(time.DateTime),
 		Name: "Hello " + time.Now().Format(time.DateTime),
-	}); err != nil {
+	}
+	if err = Permission.Create(&doc); err != nil {
 		log.Fatal(err)
 	}
 
 	// query
 	var list []*examples.Permission
-	if err := Permission.Find().Select("ID", "Code").Or("ID >", 16, "Code $PREFIX", "2023").All(&list); err != nil {
+	if err := Permission.Find().Select("ID", "Code").Or("ID >", 1, "Code $PREFIX", "2023").All(&list); err != nil {
 		log.Fatal(err)
 	}
 
