@@ -230,7 +230,7 @@ func (dm *DataModel) Find(conditions ...any) *Result {
 		dm:       dm,
 		orderBys: make(map[string]bool),
 		cache:    new(sync.Map),
-		preload:  make(map[string]*PreloadOptions),
+		preloads: make([]*PreloadOptions, 0),
 	}
 	if len(conditions) > 0 {
 		if filters := parseConditions(filterOperatorAnd, conditions); len(filters) > 0 {
@@ -249,7 +249,7 @@ type Result struct {
 	isOmit     bool
 	limit      int
 	offset     int
-	preload    map[string]*PreloadOptions
+	preloads   []*PreloadOptions
 }
 
 func (r *Result) And(conditions ...any) *Result {
@@ -297,23 +297,30 @@ func (r *Result) Omit(names ...string) *Result {
 }
 
 type PreloadOptions struct {
+	Path      string
+	Filter    any
+	CustomRel *Relationship
 }
 
-func (r *Result) PreloadBy(name string, options ...*PreloadOptions) *Result {
-	s := r.dm.schema
-	opts := new(PreloadOptions)
-	if len(options) > 0 && options[0] != nil {
-		opts = options[0]
-	}
-	if f := s.Fields[name]; f.Valid() && f.Relationship != nil {
-		r.preload[name] = opts
+func (r *Result) PreloadBy(options ...*PreloadOptions) *Result {
+	for _, option := range options {
+		if option == nil {
+			continue
+		}
+		option.Path = strings.TrimSpace(option.Path)
+		if option.Path == "" {
+			continue
+		}
+		r.preloads = append(r.preloads, option)
 	}
 	return r
 }
 
 func (r *Result) Preload(names ...string) *Result {
 	for _, name := range names {
-		r.PreloadBy(name)
+		r.PreloadBy(&PreloadOptions{
+			Path: name,
+		})
 	}
 	return r
 }
@@ -700,5 +707,5 @@ func (r *Result) reset() {
 	r.limit = 0
 	r.offset = 0
 	r.cache = new(sync.Map)
-	r.preload = make(map[string]*PreloadOptions)
+	r.preloads = make([]*PreloadOptions, 0)
 }
