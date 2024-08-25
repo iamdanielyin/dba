@@ -21,20 +21,20 @@ type DataModel struct {
 	queryTemplate  *template.Template
 }
 
-type ConflictResolutionStrategy string
+type ConflictType string
 
 const (
-	ConflictIgnore         ConflictResolutionStrategy = "IGNORE"
-	ConflictUpdatePartial  ConflictResolutionStrategy = "UPDATE_PARTIAL"
-	ConflictUpdateComputed ConflictResolutionStrategy = "UPDATE_COMPUTED"
+	ConflictIgnore         ConflictType = "IGNORE"
+	ConflictUpdatePartial  ConflictType = "UPDATE_PARTIAL"
+	ConflictUpdateComputed ConflictType = "UPDATE_COMPUTED"
 )
 
 type CreateOptions struct {
 	BatchSize            int
-	SharedTx             bool                       // 用于指定是否所有批次共用一个事务
-	ConflictResolution   ConflictResolutionStrategy // 指定冲突处理方式
-	UpdateColumns        []string                   // 在部分更新情况下指定要更新的列
-	ComputedUpdateValues map[string]any             // 在计算更新情况下指定更新的值
+	SharedTx             bool           // 用于指定是否所有批次共用一个事务
+	ConflictType         ConflictType   // 指定冲突处理方式
+	UpdateColumns        []string       // 在部分更新情况下指定要更新的列
+	ComputedUpdateValues map[string]any // 在计算更新情况下指定更新的值
 }
 
 func (dm *DataModel) Create(value any, options ...*CreateOptions) error {
@@ -173,14 +173,14 @@ func (dm *DataModel) insertBatchWithTx(tx *sqlx.Tx, columns []string, vars [][]a
 		"Rows":    strings.Join(placeholders, ", "),
 	}
 
-	if opts.ConflictResolution != "" {
-		data["ConflictResolution"] = opts.ConflictResolution
+	if opts.ConflictType != "" {
+		data["ConflictType"] = opts.ConflictType
 
 		var (
 			conflictUpdateColumns []string
 			conflictUpdateValues  []any
 		)
-		switch opts.ConflictResolution {
+		switch opts.ConflictType {
 		case ConflictIgnore:
 		case ConflictUpdatePartial:
 			for _, column := range opts.UpdateColumns {
@@ -241,15 +241,15 @@ func (dm *DataModel) Find(conditions ...any) *Result {
 }
 
 type Result struct {
-	cache      *sync.Map
-	dm         *DataModel
-	filters    []*Filter
-	orderBys   map[string]bool
-	fieldNames []string
-	isOmit     bool
-	limit      int
-	offset     int
-	preloads   []*PreloadOptions
+	cache    *sync.Map
+	dm       *DataModel
+	filters  []*Filter
+	orderBys map[string]bool
+	fields   []string
+	isOmit   bool
+	limit    int
+	offset   int
+	preloads []*PreloadOptions
 }
 
 func (r *Result) And(conditions ...any) *Result {
@@ -270,7 +270,7 @@ func (r *Result) OrderBy(name ...string) *Result {
 	return r.orderBy(false, name)
 }
 
-func (r *Result) OrderByDESC(name ...string) *Result {
+func (r *Result) OrderByDesc(name ...string) *Result {
 	return r.orderBy(true, name)
 }
 
@@ -285,21 +285,26 @@ func (r *Result) Offset(offset int) *Result {
 }
 
 func (r *Result) Select(names ...string) *Result {
-	r.fieldNames = names
+	r.fields = names
 	r.isOmit = false
 	return r
 }
 
 func (r *Result) Omit(names ...string) *Result {
-	r.fieldNames = names
+	r.fields = names
 	r.isOmit = true
 	return r
 }
 
 type PreloadOptions struct {
 	Path      string
-	Filter    any
 	CustomRel *Relationship
+	Filters   []*Filter
+	OrderBys  map[string]bool
+	Fields    []string
+	IsOmit    bool
+	Limit     int
+	Offset    int
 }
 
 func (r *Result) PreloadBy(options ...*PreloadOptions) *Result {
@@ -505,11 +510,11 @@ func (r *Result) beforeQuery() (map[string]any, []any) {
 	}
 	// 设置select或omit字段
 	var columns []string
-	if len(r.fieldNames) > 0 {
+	if len(r.fields) > 0 {
 		if r.isOmit {
 			scalarFields := r.dm.schema.ScalarFields()
 			var omitFieldsMap = make(map[string]bool)
-			for _, n := range r.fieldNames {
+			for _, n := range r.fields {
 				omitFieldsMap[n] = true
 			}
 			for _, f := range scalarFields {
@@ -519,7 +524,7 @@ func (r *Result) beforeQuery() (map[string]any, []any) {
 				columns = append(columns, f.NativeName)
 			}
 		} else {
-			for _, n := range r.fieldNames {
+			for _, n := range r.fields {
 				f := r.dm.schema.Fields[n]
 				if f.Valid() && f.NativeName != "" {
 					columns = append(columns, f.NativeName)

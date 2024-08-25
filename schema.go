@@ -38,13 +38,13 @@ var scalarTypeMap = map[SchemaType]bool{
 	Array:   true,
 }
 
-type RelationshipKind string
+type RelationshipType string
 
 const (
-	HasOne  RelationshipKind = "HAS_ONE"
-	HasMany RelationshipKind = "HAS_MANY"
-	RefOne  RelationshipKind = "REF_ONE"
-	RefMany RelationshipKind = "REF_MANY"
+	HasOne  RelationshipType = "HAS_ONE"
+	HasMany RelationshipType = "HAS_MANY"
+	RefOne  RelationshipType = "REF_ONE"
+	RefMany RelationshipType = "REF_MANY"
 )
 
 type SchemaInterface interface {
@@ -236,20 +236,20 @@ func (f *Field) Clone() *Field {
 }
 
 type Relationship struct {
-	Kind           RelationshipKind `json:"kind,omitempty"`
-	SrcSchemaName  string           `json:"src_schema_name,omitempty"`
-	SrcSchemaField string           `json:"src_schema_field,omitempty"`
-	DstSchemaName  string           `json:"dst_schema_name,omitempty"`
-	DstSchemaField string           `json:"dst_schema_field,omitempty"`
+	Type      RelationshipType `json:"kind,omitempty"`
+	SrcSchema string           `json:"src_schema,omitempty"`
+	SrcField  string           `json:"src_field,omitempty"`
+	DstSchema string           `json:"dst_schema,omitempty"`
+	DstField  string           `json:"dst_field,omitempty"`
 
-	BrgSchemaName     string `json:"brg_schema_name,omitempty"`
-	BrgSchemaSrcField string `json:"brg_schema_src_field,omitempty"`
-	BrgSchemaDstField string `json:"brg_schema_dst_field,omitempty"`
-	BrgIsNative       bool   `json:"brg_is_native,omitempty"`
+	BrgSchema   string `json:"brg_schema,omitempty"`
+	BrgSrcField string `json:"brg_src_field,omitempty"`
+	BrgDstField string `json:"brg_dst_field,omitempty"`
+	BrgIsNative bool   `json:"brg_is_native,omitempty"`
 }
 
 func (rs *Relationship) Valid() bool {
-	return rs != nil && rs.Kind != ""
+	return rs != nil && rs.Type != ""
 }
 
 func (rs *Relationship) Clone() *Relationship {
@@ -371,10 +371,10 @@ func parseSchema(value any) (*Schema, error) {
 				p.Relationship = new(Relationship)
 				p.RelConfig = v
 				if fieldReflectType.Kind() == reflect.Array || fieldReflectType.Kind() == reflect.Slice {
-					p.Relationship.DstSchemaName = elemType.Name()
+					p.Relationship.DstSchema = elemType.Name()
 					p.ItemType = elemType.Name()
 				} else {
-					p.Relationship.DstSchemaName = fieldReflectType.Name()
+					p.Relationship.DstSchema = fieldReflectType.Name()
 				}
 			}
 		}
@@ -458,23 +458,23 @@ func parseRel(config string, currentSchema *Schema, currentField *Field, allSche
 	config = strings.TrimSpace(config)
 
 	var (
-		kind   RelationshipKind
+		typ    RelationshipType
 		others string
 	)
 	if i := strings.Index(config, ","); i <= 0 {
 		return nil
 	} else {
-		kind = RelationshipKind(strings.ToUpper(config[:i]))
+		typ = RelationshipType(strings.ToUpper(config[:i]))
 		others = config[i+1:]
 	}
 
 	rel := Relationship{
-		Kind:          kind,
-		SrcSchemaName: currentSchema.Name,
+		Type:      typ,
+		SrcSchema: currentSchema.Name,
 	}
 
 	_ = mergo.Merge(&rel, &currentField.Relationship)
-	switch kind {
+	switch typ {
 	case HasOne,
 		HasMany,
 		RefOne:
@@ -485,30 +485,30 @@ func parseRel(config string, currentSchema *Schema, currentField *Field, allSche
 		if len(split) != 2 {
 			return nil
 		}
-		rel.SrcSchemaField = split[0]
-		rel.DstSchemaField = split[1]
+		rel.SrcField = split[0]
+		rel.DstField = split[1]
 	case RefMany:
 		// 直接对表：REF_MANY,UserDept(ID->UserID,ID->DeptID)
 		// 对结构体：REF_MANY,user_role_ref(id->user_id,id->role_id)
 		fi := strings.Index(others, "(")
 		li := strings.LastIndex(others, ")")
-		rel.BrgSchemaName = others[:fi]
+		rel.BrgSchema = others[:fi]
 		for i, item := range strings.Split(others[fi+1:li], ",") {
 			item = strings.TrimSpace(item)
 			split := strings.Split(item, "->")
 			if len(split) == 2 {
 				if i == 0 {
 					// src
-					rel.SrcSchemaField = split[0]
-					rel.BrgSchemaSrcField = split[1]
+					rel.SrcField = split[0]
+					rel.BrgSrcField = split[1]
 				} else {
 					// dst
-					rel.DstSchemaField = split[0]
-					rel.BrgSchemaDstField = split[1]
+					rel.DstField = split[0]
+					rel.BrgDstField = split[1]
 				}
 			}
 		}
-		if _, has := allSchemas[rel.BrgSchemaName]; has {
+		if _, has := allSchemas[rel.BrgSchema]; has {
 			rel.BrgIsNative = false
 		} else {
 			rel.BrgIsNative = true
