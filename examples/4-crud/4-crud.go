@@ -58,4 +58,12 @@ func main() {
 	if _, err := Permission.Find("ID =", list[0].ID).Delete(); err != nil {
 		log.Fatal(err)
 	}
+
+	// preload
+	User := dba.Model("User")
+	var users []*examples.User
+	if err := User.Find().Preload("Profile", "Org", "Roles").Preload("Roles.Permissions").All(&users); err != nil {
+		log.Fatal(err)
+	}
+	log.Println(len(users))
 }
