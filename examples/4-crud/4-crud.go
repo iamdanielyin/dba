@@ -65,5 +65,27 @@ func main() {
 	if err := User.Find().Preload("Profile", "Org", "Roles").Preload("Roles.Permissions").All(&users); err != nil {
 		log.Fatal(err)
 	}
+	// TODO 手工联查
+	// 1.收集id
+	var userIds []uint
+	for _, user := range users {
+		userIds = append(userIds, user.ID)
+	}
+	// 2.统一查询
+	Profile := dba.Model("Profile")
+	var profiles []*examples.Profile
+	if err := Profile.Find("UserID $IN", userIds).All(&profiles); err != nil {
+		log.Fatal(err)
+	}
+	// 3.建立映射
+	userProfileMap := make(map[uint]*examples.Profile)
+	for _, profile := range profiles {
+		userProfileMap[profile.UserID] = profile
+	}
+	// 4.回写字段
+	for i, user := range users {
+		user.Profile = userProfileMap[user.ID]
+		users[i] = user
+	}
 	log.Println(len(users))
 }
