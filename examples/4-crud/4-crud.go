@@ -65,7 +65,12 @@ func main() {
 	if err := User.Find().Preload("Profile", "Org", "Roles").Preload("Roles.Permissions").All(&users); err != nil {
 		log.Fatal(err)
 	}
+
 	// TODO 手工联查
+
+	// ---------------------
+	// ------ HAS_ONE ------
+	// ---------------------
 	// 1.收集id
 	var userIds []uint
 	for _, user := range users {
@@ -87,5 +92,124 @@ func main() {
 		user.Profile = userProfileMap[user.ID]
 		users[i] = user
 	}
-	log.Println(len(users))
+
+	// ----------------------
+	// ------ HAS_MANY ------
+	// ----------------------
+	// 1.收集id（同上）
+	// 2.统一查询
+	Account := dba.Model("Account")
+	var accounts []*examples.Account
+	if err := Account.Find("UserID $IN", userIds).All(&accounts); err != nil {
+		log.Fatal(err)
+	}
+	// 3.建立映射
+	userAccountsMap := make(map[uint][]*examples.Account)
+	for _, account := range accounts {
+		userAccountsMap[account.UserID] = append(userAccountsMap[account.UserID], account)
+	}
+	// 4.回写字段
+	for i, user := range users {
+		user.Accounts = userAccountsMap[user.ID]
+		users[i] = user
+	}
+
+	// ---------------------
+	// ------ REF_ONE ------
+	// ---------------------
+	// 1.收集id
+	var orgIds []uint
+	for _, user := range users {
+		orgIds = append(orgIds, user.OrgID)
+	}
+	// 2.统一查询
+	Org := dba.Model("Org")
+	var orgs []*examples.Org
+	if err := Org.Find("OrgID $IN", orgIds).All(&orgs); err != nil {
+		log.Fatal(err)
+	}
+	// 3.建立映射
+	orgMap := make(map[uint]*examples.Org)
+	for _, org := range orgs {
+		orgMap[org.ID] = org
+	}
+	// 4.回写字段
+	for i, user := range users {
+		user.Org = orgMap[user.OrgID]
+		users[i] = user
+	}
+
+	// --------------------------------
+	// ------ REF_MANY [Usage 1] ------
+	// --------------------------------
+	// 1.收集id（同上）
+	// 2.统一查询
+	var allBrgData []map[string]any
+	if err := dba.Query(&allBrgData, `SELECT * FROM user_role_ref WHERE user_id IN (?)`, userIds); err != nil {
+		log.Fatal(err)
+	}
+	var allRoleIds []uint
+	for _, brg := range allBrgData {
+		allRoleIds = append(allRoleIds, brg["role_id"].(uint))
+	}
+	Role := dba.Model("Role")
+	var allRoles []*examples.Role
+	if err := Role.Find("ID $IN", allRoleIds).All(&allRoles); err != nil {
+		log.Fatal(err)
+	}
+	roleMap := make(map[uint]*examples.Role)
+	for _, role := range allRoles {
+		roleMap[role.ID] = role
+	}
+	// 3.建立映射
+	userRolesMap := make(map[uint][]*examples.Role)
+	for _, brg := range allBrgData {
+		userId := brg["user_id"].(uint)
+		roleId := brg["role_id"].(uint)
+		role := roleMap[roleId]
+		if role == nil {
+			continue
+		}
+		userRolesMap[userId] = append(userRolesMap[userId], role)
+	}
+	// 4.回写字段
+	for i, user := range users {
+		user.Roles = userRolesMap[user.ID]
+		users[i] = user
+	}
+
+	// --------------------------------
+	// ------ REF_MANY [Usage 2] ------
+	// --------------------------------
+	// 1.收集id（同上）
+	// 2.统一查询
+	var allBrgSchema []*examples.UserDept
+	UserDept := dba.Model("UserDept")
+	if err := UserDept.Find("UserID $IN", userIds).All(&allBrgSchema); err != nil {
+		log.Fatal(err)
+	}
+	var allDeptIds []uint
+	for _, brg := range allBrgSchema {
+		allDeptIds = append(allDeptIds, brg.DeptID)
+	}
+	Dept := dba.Model("Dept")
+	var allDepts []*examples.Dept
+	if err := Dept.Find("ID $IN", allDeptIds).All(&allDepts); err != nil {
+		log.Fatal(err)
+	}
+	deptMap := make(map[uint]*examples.Dept)
+	for _, dept := range allDepts {
+		deptMap[dept.ID] = dept
+	}
+	// 3.建立映射
+	userDeptsMap := make(map[uint][]*examples.UserDept)
+	for _, brg := range allBrgSchema {
+		brg.Dept = deptMap[brg.DeptID]
+		userDeptsMap[brg.UserID] = append(userDeptsMap[brg.UserID], brg)
+	}
+	// 4.回写字段
+	for i, user := range users {
+		user.Departments = userDeptsMap[user.ID]
+		users[i] = user
+	}
 }
