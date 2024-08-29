@@ -175,7 +175,7 @@ func (ns *Namespace) RepairRelationships() {
 }
 
 func (ns *Namespace) Model(schemaName string) *DataModel {
-	return ns.ModelBySession("", schemaName)
+	return ns.ModelBy("", schemaName)
 }
 
 func (ns *Namespace) Init(connectionName ...string) error {
@@ -193,7 +193,7 @@ func (ns *Namespace) Init(connectionName ...string) error {
 	return nil
 }
 
-func (ns *Namespace) ModelBySession(connectionName, schemaName string) *DataModel {
+func (ns *Namespace) ModelBy(connectionName, schemaName string) *DataModel {
 	conn := ns.Session(connectionName)
 	if conn == nil {
 		panic(fmt.Errorf("connection not exists: %s", connectionName))

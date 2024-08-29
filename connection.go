@@ -47,6 +47,11 @@ func (c *Connection) GenDDL(schemas map[string]*Schema, ignoreComments ...bool) 
 	return c.driver.GenDDL(sortedNames, schemas, ignoreComments...)
 }
 
+func (c *Connection) Query(dst any, query string, args ...any) error {
+	query = formatSQL(query)
+	return autoScan(dst, c.xdb, query, args)
+}
+
 func (c *Connection) Exec(query string, args ...any) (int, error) {
 	query = formatSQL(query)
 	r, err := c.xdb.Exec(query, args...)
