@@ -295,7 +295,7 @@ func parseSchema(value any) (*Schema, error) {
 
 	s := structs.New(value)
 	structName := s.Name()
-	schema := Schema{
+	sch := Schema{
 		structType: reflectType,
 		Name:       structName,
 		NativeName: strcase.ToSnake(structName),
@@ -303,7 +303,7 @@ func parseSchema(value any) (*Schema, error) {
 	}
 	if si, ok := value.(SchemaInterface); ok {
 		d := si.Schema()
-		if err := mergo.Merge(&schema, d); err != nil {
+		if err := mergo.Merge(&sch, d); err != nil {
 			return nil, errors.Wrap(err, "dba: failed to merge schema")
 		}
 	}
@@ -336,7 +336,7 @@ func parseSchema(value any) (*Schema, error) {
 			embeddedSchema, err := parseSchema(embeddedValue)
 			if err == nil {
 				for _, embeddedField := range embeddedSchema.Fields {
-					schema.Fields[embeddedField.Name] = embeddedField
+					sch.Fields[embeddedField.Name] = embeddedField
 				}
 			}
 			continue
@@ -390,10 +390,10 @@ func parseSchema(value any) (*Schema, error) {
 		if p.Type == "" {
 			continue
 		}
-		schema.Fields[p.Name] = p
+		sch.Fields[p.Name] = p
 	}
-	structParsedMap.Store(parsedKey, schema)
-	return &schema, nil
+	structParsedMap.Store(parsedKey, sch)
+	return &sch, nil
 }
 
 func parseFieldType(fieldNewValue any, fieldKind reflect.Kind, p *Field) {

@@ -299,12 +299,13 @@ func (r *Result) Omit(names ...string) *Result {
 type PreloadOptions struct {
 	Path      string
 	CustomRel *Relationship
-	Filters   []*Filter
+	Filter    *Filter
 	OrderBys  map[string]bool
 	Fields    []string
 	IsOmit    bool
 	Limit     int
 	Offset    int
+	BrgFilter *Filter
 }
 
 func (r *Result) PreloadBy(options ...*PreloadOptions) *Result {
@@ -338,7 +339,7 @@ func (r *Result) orderBy(isDesc bool, names []string) *Result {
 	return r
 }
 
-func parseWhere(schema *Schema, filters []*Filter) (string, []any) {
+func parseWhere(sch *Schema, filters []*Filter) (string, []any) {
 
 	if len(filters) > 0 {
 		var setItem func(filterOperator, []*Filter) (string, []any)
@@ -366,7 +367,7 @@ func parseWhere(schema *Schema, filters []*Filter) (string, []any) {
 					entryList := item.entryList.([]*Entry)
 					for _, entry := range entryList {
 						key := entry.Key
-						field := schema.Fields[key]
+						field := sch.Fields[key]
 						if field.Valid() && field.NativeName != "" {
 							key = field.NativeName
 						}
@@ -462,10 +463,10 @@ func parseWhere(schema *Schema, filters []*Filter) (string, []any) {
 	return "", nil
 }
 
-func parseOrderBys(schema *Schema, orderBys map[string]bool) (string, []any) {
+func parseOrderBys(sch *Schema, orderBys map[string]bool) (string, []any) {
 	var clauses []string
 	for key, val := range orderBys {
-		if f := schema.Fields[key]; f.Valid() && f.NativeName != "" {
+		if f := sch.Fields[key]; f.Valid() && f.NativeName != "" {
 			key = f.NativeName
 		}
 		if val {
@@ -542,35 +543,21 @@ func (r *Result) beforeQuery() (map[string]any, []any) {
 	return data, attrs
 }
 
-func autoScan(dst any, xdb *sqlx.DB, sql string, attrs []any) error {
-	ruv, err := NewReflectUtils(dst)
-	if err != nil {
-		return err
-	}
-
-	switch ruv.TypeCategory() {
-	case CategoryStruct, CategoryStructPointer:
-		return xdb.Get(dst, sql, attrs...)
-	case CategoryMapStringAny:
-		return xdb.QueryRowx(sql, attrs...).MapScan(dst.(map[string]any))
-	case CategoryStructSliceOrArray, CategoryStructPointerSliceOrArray:
-		return xdb.Select(dst, sql, attrs...)
-	case CategoryMapStringAnyPointerSliceOrArray:
-		rows, err := xdb.Queryx(sql, attrs...)
-		if err != nil {
-			return err
-		}
-		sliceValue := reflect.ValueOf(ruv.CreateEmptyCopy())
-		for rows.Next() {
-			elem, _ := ruv.CreateEmptyElement()
-			if err = rows.MapScan(elem.(map[string]any)); err == nil {
-				elemValue := reflect.ValueOf(elem)
-				sliceValue = reflect.Append(sliceValue, elemValue)
+func (r *Result) afterQuery(dst any) error {
+	sch := r.dm.schema
+	for _, item := range r.preloads {
+		paths := strings.Split(item.Path, ".")
+		for i, p := range paths {
+			if i == len(paths)-1 {
+				_ = preload(dst, sch, &PreloadOptions{
+					Path: p,
+				})
+			} else {
+				item.Path = p
+				_ = preload(dst, sch, item)
 			}
 		}
-		ruv.IndirectVal().Set(sliceValue)
 	}
-
 	return nil
 }
 
@@ -586,7 +573,11 @@ func (r *Result) One(dst any) error {
 	sql := buff.String()
 	sql = formatSQL(sql)
 
-	return autoScan(dst, r.dm.xdb, sql, attrs)
+	if err := autoScan(dst, r.dm.xdb, sql, attrs); err != nil {
+		return err
+	}
+
+	return r.afterQuery(dst)
 }
 
 func (r *Result) All(dst any) error {
@@ -601,7 +592,11 @@ func (r *Result) All(dst any) error {
 	sql := buff.String()
 	sql = formatSQL(sql)
 
-	return autoScan(dst, r.dm.xdb, sql, attrs)
+	if err := autoScan(dst, r.dm.xdb, sql, attrs); err != nil {
+		return err
+	}
+
+	return r.afterQuery(dst)
 }
 
 func (r *Result) Count() (int, error) {
@@ -713,4 +708,61 @@ func (r *Result) reset() {
 	r.offset = 0
 	r.cache = new(sync.Map)
 	r.preloads = make([]*PreloadOptions, 0)
+}
+
+func autoScan(dst any, xdb *sqlx.DB, sql string, attrs []any) error {
+	ruv, err := NewReflectUtils(dst)
+	if err != nil {
+		return err
+	}
+
+	switch ruv.TypeCategory() {
+	case CategoryStruct, CategoryStructPointer:
+		return xdb.Get(dst, sql, attrs...)
+	case CategoryMapStringAny:
+		return xdb.QueryRowx(sql, attrs...).MapScan(dst.(map[string]any))
+	case CategoryStructSliceOrArray, CategoryStructPointerSliceOrArray:
+		return xdb.Select(dst, sql, attrs...)
+	case CategoryMapStringAnyPointerSliceOrArray:
+		rows, err := xdb.Queryx(sql, attrs...)
+		if err != nil {
+			return err
+		}
+		sliceValue := reflect.ValueOf(ruv.CreateEmptyCopy())
+		for rows.Next() {
+			elem, _ := ruv.CreateEmptyElement()
+			if err = rows.MapScan(elem.(map[string]any)); err == nil {
+				elemValue := reflect.ValueOf(elem)
+				sliceValue = reflect.Append(sliceValue, elemValue)
+			}
+		}
+		ruv.IndirectVal().Set(sliceValue)
+	}
+
+	return nil
+}
+
+func preload(dst any, sch *Schema, opts *PreloadOptions) error {
+	field := sch.Fields[opts.Path]
+	rel := field.Relationship
+	if opts.CustomRel != nil {
+		rel = opts.CustomRel
+	}
+	if !field.Valid() || rel == nil {
+		return fmt.Errorf("preload field failed: %s.%s", sch.Name, opts.Path)
+	}
+
+	switch rel.Type {
+	case HasOne:
+		// TODO 待实现
+	case HasMany:
+		// TODO 待实现
+	case RefOne:
+		// TODO 待实现
+	case RefMany:
+		// TODO 待实现
+	default:
+		return fmt.Errorf("unknown relationship: %s.%s[%s]", sch.Name, opts.Path, rel.Type)
+	}
+	return nil
 }

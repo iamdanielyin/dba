@@ -22,12 +22,12 @@ func (m *sqliteDriver) Connect(config *ConnectConfig) (*sqlx.DB, error) {
 func (m *sqliteDriver) GenDDL(sortedNames []string, schemas map[string]*Schema, ignoreComments ...bool) string {
 	var ddls []string
 	for _, name := range sortedNames {
-		schema := schemas[name]
+		sch := schemas[name]
 		var (
 			columns        []string
 			primaryColumns []string
 		)
-		for _, field := range schema.Fields {
+		for _, field := range sch.Fields {
 			var buffer bytes.Buffer
 			buffer.WriteString(fmt.Sprintf("`%s`\t", field.NativeName))
 			nativeType := strings.TrimSpace(field.NativeType)
@@ -68,9 +68,9 @@ func (m *sqliteDriver) GenDDL(sortedNames []string, schemas map[string]*Schema, 
 		columns = append(columns, fmt.Sprintf("PRIMARY KEY (%s)", strings.Join(primaryColumns, ",")))
 		var buffer bytes.Buffer
 		if len(ignoreComments) > 0 && !ignoreComments[0] {
-			buffer.WriteString(fmt.Sprintf("-- create \"%s\" table\n", schema.NativeName))
+			buffer.WriteString(fmt.Sprintf("-- create \"%s\" table\n", sch.NativeName))
 		}
-		buffer.WriteString(fmt.Sprintf("CREATE TABLE IF NOT EXISTS `%s` (\n%s\n);", schema.NativeName, strings.Join(columns, ",\n")))
+		buffer.WriteString(fmt.Sprintf("CREATE TABLE IF NOT EXISTS `%s` (\n%s\n);", sch.NativeName, strings.Join(columns, ",\n")))
 		ddls = append(ddls, buffer.String())
 	}
 	return strings.Join(ddls, "\n\n")
