@@ -760,25 +760,44 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 			var srcValues []any
 			for i := 0; i < ru.GetLen(); i++ {
 				elem := ru.GetElement(i)
-				val, ok := ru.GetFieldOrKey(elem, rel.SrcField)
-				if !ok {
+				val, isEmpty := ru.GetFieldOrKey(elem, rel.SrcField)
+				if !isEmpty {
 					continue
 				}
 				srcValues = append(srcValues, val)
 			}
 			emptyElem := ru.CreateEmptyElement()
-			relatedSliceReflect, err := GetZeroSliceValueOfField(emptyElem, opts.Path)
+			relatedSlice, err := GetZeroSliceValueOfField(emptyElem, opts.Path)
 			if err != nil {
 				return err
 			}
 			// 2.统一查询关联数据
 			RelatedModel := ns.ModelBy(conn.name, rel.DstSchema)
-			relatedSliceDst := reflect.Indirect(relatedSliceReflect).Addr().Interface()
-			if err := RelatedModel.Find(fmt.Sprintf("%s $IN", rel.DstField), srcValues).All(relatedSliceDst); err != nil {
+			if err := RelatedModel.Find(fmt.Sprintf("%s $IN", rel.DstField), srcValues).All(reflect.Indirect(relatedSlice).Addr().Interface()); err != nil {
 				return err
 			}
 			// 3.建立映射
+			relatedMap := make(map[any]any)
+			for i := 0; i < relatedSlice.Len(); i++ {
+				ruElem, err := NewReflectUtils(reflect.Indirect(relatedSlice.Index(i)).Addr().Interface())
+				if err != nil {
+					continue
+				}
+				result, isEmpty := ruElem.GetFieldOrKey(ruElem.Raw(), rel.DstField)
+				if isEmpty {
+					continue
+				}
+				relatedMap[result] = ruElem.Raw()
+			}
 			// 4.回写字段
+			for i := 0; i < ru.GetLen(); i++ {
+				elem := ru.GetElement(i)
+				val, isEmpty := ru.GetFieldOrKey(elem, rel.SrcField)
+				if !isEmpty {
+					continue
+				}
+				_ = ru.SetFieldOrKey(elem, opts.Path, relatedMap[val])
+			}
 		case HasMany:
 			// TODO 待实现
 
@@ -809,87 +828,4 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 	}
 
 	return nil
-}
-
-// populateHasOneRelation 不使用泛型，使用 any 和反射实现
-func populateHasOneRelation(parentStructSlice any, relationFieldName string) error {
-	// 获取父结构体切片的反射值
-	parentSliceValue := reflect.ValueOf(parentStructSlice)
-	if parentSliceValue.Kind() != reflect.Slice {
-		return fmt.Errorf("parentStructSlice must be a slice")
-	}
-
-	// 获取切片元素的类型
-	parentStructType := parentSliceValue.Type().Elem()
-	if parentStructType.Kind() != reflect.Ptr || parentStructType.Elem().Kind() != reflect.Struct {
-		return fmt.Errorf("parentStructSlice must be a slice of struct pointers")
-	}
-
-	// 获取关联字段的Field类型和Schema
-	relationField, ok := parentStructType.Elem().FieldByName(relationFieldName)
-	if !ok {
-		return fmt.Errorf("relationField %s not found in parentStructType", relationFieldName)
-	}
-	schemaTag := relationField.Tag.Get("dba")
-	relConfig := ParseTag(schemaTag)["rel"]
-	if relConfig == "" {
-		return fmt.Errorf("relation configuration not found for field %s", relationFieldName)
-	}
-	relationSchema := ParseSchemaFromField(relationField)
-
-	// 收集关联的ID
-	var relatedIds []uint
-	for i := 0; i < parentSliceValue.Len(); i++ {
-		parentStruct := parentSliceValue.Index(i).Elem()
-		idField := parentStruct.FieldByName("ID")
-		if !idField.IsValid() || idField.Kind() != reflect.Uint {
-			return fmt.Errorf("ID field not found or invalid in parent struct")
-		}
-		relatedIds = append(relatedIds, uint(idField.Uint()))
-	}
-
-	// 查询关联数据
-	var relatedStructSlice reflect.Value
-	relatedModelName := relationSchema.Name
-	err := Model(relatedModelName).Find("UserID $IN", relatedIds).All(&relatedStructSlice)
-	if err != nil {
-		return fmt.Errorf("failed to query related data: %w", err)
-	}
-
-	// 建立映射
-	relatedMap := make(map[uint]reflect.Value)
-	for i := 0; i < relatedStructSlice.Len(); i++ {
-		relatedStruct := relatedStructSlice.Index(i)
-		userIDField := relatedStruct.FieldByName("UserID")
-		if !userIDField.IsValid() || userIDField.Kind() != reflect.Uint {
-			return fmt.Errorf("UserID field not found or invalid in related struct")
-		}
-		relatedMap[uint(userIDField.Uint())] = relatedStruct
-	}
-
-	// 回写字段
-	for i := 0; i < parentSliceValue.Len(); i++ {
-		parentStruct := parentSliceValue.Index(i).Elem()
-		idField := parentStruct.FieldByName("ID")
-		if relatedStruct, ok := relatedMap[uint(idField.Uint())]; ok {
-			relationFieldValue := parentStruct.FieldByName(relationFieldName)
-			if relationFieldValue.Kind() == reflect.Ptr {
-				relationFieldValue.Set(relatedStruct.Addr())
-			} else {
-				relationFieldValue.Set(relatedStruct)
-			}
-		}
-	}
-
-	return nil
-}
-
-// 示例函数：解析字段的Schema（简化版本）
-func ParseSchemaFromField(field reflect.StructField) *Schema {
-	// 此处假设ParseSchema函数已经实现
-	schemas, err := ParseSchema(field.Type)
-	if err != nil || len(schemas) == 0 {
-		return nil
-	}
-	return schemas[0]
 }

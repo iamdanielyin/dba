@@ -779,7 +779,3 @@ func GetZeroSliceValueOfField(input any, fieldName string) (reflect.Value, error
 
 	return reflect.Value{}, fmt.Errorf("unsupported type: %s", v.Kind().String())
 }
-
-func (receiver) name() {
-
-}
