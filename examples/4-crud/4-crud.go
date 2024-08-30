@@ -59,10 +59,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// preload
+	// populate
 	User := dba.Model("User")
 	var users []*examples.User
-	if err := User.Find().Preload("Profile", "Org", "Roles").Preload("Roles.Permissions").All(&users); err != nil {
+	if err := User.Find().Populate("Profile", "Org", "Roles").Populate("Roles.Permissions").All(&users); err != nil {
 		log.Fatal(err)
 	}
 

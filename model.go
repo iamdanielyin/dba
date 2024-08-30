@@ -46,7 +46,7 @@ func (dm *DataModel) Create(value any, options ...*CreateOptions) error {
 		opts.BatchSize = 50
 	}
 
-	ruv, err := NewReflectUtils(value)
+	ru, err := NewReflectUtils(value)
 	if err != nil {
 		return err
 	}
@@ -55,26 +55,19 @@ func (dm *DataModel) Create(value any, options ...*CreateOptions) error {
 	nativeFields := dm.schema.NativeFields()
 	var allVars [][]any
 
-	var isArray bool
-	switch ruv.TypeCategory() {
-	case CategoryStruct, CategoryStructPointer, CategoryMapStringAny:
-		// 单个值插入
-		rowVars := extractRowVars(ruv, value, columns, nativeFields)
-		allVars = append(allVars, rowVars)
-
-	case CategoryStructSliceOrArray, CategoryStructPointerSliceOrArray, CategoryMapStringAnyPointerSliceOrArray:
-		isArray = true
+	if ru.isArray {
 		// 切片或数组插入
-		size, _ := ruv.GetLen()
+		size := ru.GetLen()
 		allVars = make([][]any, size)
 		for i := 0; i < size; i++ {
-			elem, e := ruv.GetElement(i)
-			if e != nil {
-				continue
-			}
-			rowVars := extractRowVars(ruv, elem, columns, nativeFields)
+			elem := ru.GetElement(i)
+			rowVars := extractRowVars(ru, elem, columns, nativeFields)
 			allVars[i] = rowVars
 		}
+	} else {
+		// 单个值插入
+		rowVars := extractRowVars(ru, value, columns, nativeFields)
+		allVars = append(allVars, rowVars)
 	}
 
 	aif := dm.schema.AutoIncrField()
@@ -124,11 +117,11 @@ func (dm *DataModel) Create(value any, options ...*CreateOptions) error {
 		if lastInsertId > 0 && aif != nil {
 			// 设置自增字段
 			for j := end - 1; j >= i; j-- {
-				if isArray {
-					elem, _ := ruv.GetElement(j)
-					_ = ruv.SetFieldOrKey(elem, aif.Name, insertID)
+				if ru.isArray {
+					elem := ru.GetElement(j)
+					_ = ru.SetFieldOrKey(elem, aif.Name, insertID)
 				} else {
-					_ = ruv.SetFieldOrKey(ruv.Raw(), aif.Name, insertID)
+					_ = ru.SetFieldOrKey(ru.Raw(), aif.Name, insertID)
 				}
 				insertID--
 			}
@@ -146,11 +139,11 @@ func (dm *DataModel) Create(value any, options ...*CreateOptions) error {
 }
 
 // extractRowVars 提取单行数据
-func extractRowVars(ruv *ReflectUtils, value any, columns []string, nativeFields map[string]*Field) []any {
+func extractRowVars(ru *ReflectUtils, value any, columns []string, nativeFields map[string]*Field) []any {
 	var rowVars []any
 	for _, column := range columns {
 		field := nativeFields[column]
-		v, _ := ruv.GetFieldOrKey(value, field.Name)
+		v, _ := ru.GetFieldOrKey(value, field.Name)
 		rowVars = append(rowVars, v)
 	}
 	return rowVars
@@ -227,10 +220,10 @@ func (dm *DataModel) insertBatchWithTx(tx *sqlx.Tx, columns []string, vars [][]a
 
 func (dm *DataModel) Find(conditions ...any) *Result {
 	res := &Result{
-		dm:       dm,
-		orderBys: make(map[string]bool),
-		cache:    new(sync.Map),
-		preloads: make([]*PreloadOptions, 0),
+		dm:        dm,
+		orderBys:  make(map[string]bool),
+		cache:     new(sync.Map),
+		populates: make([]*PopulateOptions, 0),
 	}
 	if len(conditions) > 0 {
 		if filters := parseConditions(filterOperatorAnd, conditions); len(filters) > 0 {
@@ -241,15 +234,15 @@ func (dm *DataModel) Find(conditions ...any) *Result {
 }
 
 type Result struct {
-	cache    *sync.Map
-	dm       *DataModel
-	filters  []*Filter
-	orderBys map[string]bool
-	fields   []string
-	isOmit   bool
-	limit    int
-	offset   int
-	preloads []*PreloadOptions
+	cache     *sync.Map
+	dm        *DataModel
+	filters   []*Filter
+	orderBys  map[string]bool
+	fields    []string
+	isOmit    bool
+	limit     int
+	offset    int
+	populates []*PopulateOptions
 }
 
 func (r *Result) And(conditions ...any) *Result {
@@ -296,19 +289,19 @@ func (r *Result) Omit(names ...string) *Result {
 	return r
 }
 
-type PreloadOptions struct {
+type PopulateOptions struct {
 	Path      string
 	CustomRel *Relationship
-	Filter    *Filter
-	OrderBys  map[string]bool
+	Match     *Filter
+	BrgMatch  *Filter
 	Fields    []string
 	IsOmit    bool
+	OrderBys  map[string]bool
 	Limit     int
 	Offset    int
-	BrgFilter *Filter
 }
 
-func (r *Result) PreloadBy(options ...*PreloadOptions) *Result {
+func (r *Result) PopulateBy(options ...*PopulateOptions) *Result {
 	for _, option := range options {
 		if option == nil {
 			continue
@@ -317,14 +310,14 @@ func (r *Result) PreloadBy(options ...*PreloadOptions) *Result {
 		if option.Path == "" {
 			continue
 		}
-		r.preloads = append(r.preloads, option)
+		r.populates = append(r.populates, option)
 	}
 	return r
 }
 
-func (r *Result) Preload(names ...string) *Result {
+func (r *Result) Populate(names ...string) *Result {
 	for _, name := range names {
-		r.PreloadBy(&PreloadOptions{
+		r.PopulateBy(&PopulateOptions{
 			Path: name,
 		})
 	}
@@ -545,16 +538,16 @@ func (r *Result) beforeQuery() (map[string]any, []any) {
 
 func (r *Result) afterQuery(dst any) error {
 	sch := r.dm.schema
-	for _, item := range r.preloads {
+	for _, item := range r.populates {
 		paths := strings.Split(item.Path, ".")
 		for i, p := range paths {
 			if i == len(paths)-1 {
-				_ = preload(dst, sch, &PreloadOptions{
+				_ = populate(dst, r.dm.conn, sch, &PopulateOptions{
 					Path: p,
 				})
 			} else {
 				item.Path = p
-				_ = preload(dst, sch, item)
+				_ = populate(dst, r.dm.conn, sch, item)
 			}
 		}
 	}
@@ -644,11 +637,11 @@ func (r *Result) Update(doc any) (int, error) {
 	defer r.reset()
 
 	data, attrs := r.beforeQuery()
-	ruv, err := NewReflectUtils(doc)
+	ru, err := NewReflectUtils(doc)
 	if err != nil {
 		return 0, err
 	}
-	pairs, err := ruv.GetAllFieldsOrKeysAndValues(ruv.Raw())
+	pairs, err := ru.GetAllFieldsOrKeysAndValues(ru.Raw())
 	if err != nil {
 		return 0, err
 	}
@@ -707,16 +700,16 @@ func (r *Result) reset() {
 	r.limit = 0
 	r.offset = 0
 	r.cache = new(sync.Map)
-	r.preloads = make([]*PreloadOptions, 0)
+	r.populates = make([]*PopulateOptions, 0)
 }
 
 func autoScan(dst any, xdb *sqlx.DB, sql string, attrs []any) error {
-	ruv, err := NewReflectUtils(dst)
+	ru, err := NewReflectUtils(dst)
 	if err != nil {
 		return err
 	}
 
-	switch ruv.TypeCategory() {
+	switch ru.TypeCategory() {
 	case CategoryStruct, CategoryStructPointer:
 		return xdb.Get(dst, sql, attrs...)
 	case CategoryMapStringAny:
@@ -728,41 +721,175 @@ func autoScan(dst any, xdb *sqlx.DB, sql string, attrs []any) error {
 		if err != nil {
 			return err
 		}
-		sliceValue := reflect.ValueOf(ruv.CreateEmptyCopy())
+		sliceValue := reflect.ValueOf(ru.CreateEmptyCopy())
 		for rows.Next() {
-			elem, _ := ruv.CreateEmptyElement()
+			elem := ru.CreateEmptyElement()
 			if err = rows.MapScan(elem.(map[string]any)); err == nil {
 				elemValue := reflect.ValueOf(elem)
 				sliceValue = reflect.Append(sliceValue, elemValue)
 			}
 		}
-		ruv.IndirectVal().Set(sliceValue)
+		ru.IndirectVal().Set(sliceValue)
 	}
 
 	return nil
 }
 
-func preload(dst any, sch *Schema, opts *PreloadOptions) error {
+func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) error {
 	field := sch.Fields[opts.Path]
 	rel := field.Relationship
 	if opts.CustomRel != nil {
 		rel = opts.CustomRel
 	}
+
 	if !field.Valid() || rel == nil {
-		return fmt.Errorf("preload field failed: %s.%s", sch.Name, opts.Path)
+		return fmt.Errorf("populate field failed: %s.%s", sch.Name, opts.Path)
 	}
 
-	switch rel.Type {
-	case HasOne:
-		// TODO 待实现
-	case HasMany:
-		// TODO 待实现
-	case RefOne:
-		// TODO 待实现
-	case RefMany:
-		// TODO 待实现
-	default:
-		return fmt.Errorf("unknown relationship: %s.%s[%s]", sch.Name, opts.Path, rel.Type)
+	ru, err := NewReflectUtils(dst)
+	if err != nil {
+		return err
 	}
+
+	ns := conn.ns
+
+	if ru.isArray {
+		switch rel.Type {
+		case HasOne:
+			// 1.收集关联的ID
+			var srcValues []any
+			for i := 0; i < ru.GetLen(); i++ {
+				elem := ru.GetElement(i)
+				val, ok := ru.GetFieldOrKey(elem, rel.SrcField)
+				if !ok {
+					continue
+				}
+				srcValues = append(srcValues, val)
+			}
+			emptyElem := ru.CreateEmptyElement()
+			relatedSliceReflect, err := GetZeroSliceValueOfField(emptyElem, opts.Path)
+			if err != nil {
+				return err
+			}
+			// 2.统一查询关联数据
+			RelatedModel := ns.ModelBy(conn.name, rel.DstSchema)
+			relatedSliceDst := reflect.Indirect(relatedSliceReflect).Addr().Interface()
+			if err := RelatedModel.Find(fmt.Sprintf("%s $IN", rel.DstField), srcValues).All(relatedSliceDst); err != nil {
+				return err
+			}
+			// 3.建立映射
+			// 4.回写字段
+		case HasMany:
+			// TODO 待实现
+
+		case RefOne:
+			// TODO 待实现
+
+		case RefMany:
+			// TODO 待实现
+		default:
+			return fmt.Errorf("unknown relationship: %s.%s[%s]", sch.Name, opts.Path, rel.Type)
+		}
+	} else {
+		switch rel.Type {
+		case HasOne:
+			// TODO 待实现
+
+		case HasMany:
+			// TODO 待实现
+
+		case RefOne:
+			// TODO 待实现
+
+		case RefMany:
+			// TODO 待实现
+		default:
+			return fmt.Errorf("unknown relationship: %s.%s[%s]", sch.Name, opts.Path, rel.Type)
+		}
+	}
+
 	return nil
+}
+
+// populateHasOneRelation 不使用泛型，使用 any 和反射实现
+func populateHasOneRelation(parentStructSlice any, relationFieldName string) error {
+	// 获取父结构体切片的反射值
+	parentSliceValue := reflect.ValueOf(parentStructSlice)
+	if parentSliceValue.Kind() != reflect.Slice {
+		return fmt.Errorf("parentStructSlice must be a slice")
+	}
+
+	// 获取切片元素的类型
+	parentStructType := parentSliceValue.Type().Elem()
+	if parentStructType.Kind() != reflect.Ptr || parentStructType.Elem().Kind() != reflect.Struct {
+		return fmt.Errorf("parentStructSlice must be a slice of struct pointers")
+	}
+
+	// 获取关联字段的Field类型和Schema
+	relationField, ok := parentStructType.Elem().FieldByName(relationFieldName)
+	if !ok {
+		return fmt.Errorf("relationField %s not found in parentStructType", relationFieldName)
+	}
+	schemaTag := relationField.Tag.Get("dba")
+	relConfig := ParseTag(schemaTag)["rel"]
+	if relConfig == "" {
+		return fmt.Errorf("relation configuration not found for field %s", relationFieldName)
+	}
+	relationSchema := ParseSchemaFromField(relationField)
+
+	// 收集关联的ID
+	var relatedIds []uint
+	for i := 0; i < parentSliceValue.Len(); i++ {
+		parentStruct := parentSliceValue.Index(i).Elem()
+		idField := parentStruct.FieldByName("ID")
+		if !idField.IsValid() || idField.Kind() != reflect.Uint {
+			return fmt.Errorf("ID field not found or invalid in parent struct")
+		}
+		relatedIds = append(relatedIds, uint(idField.Uint()))
+	}
+
+	// 查询关联数据
+	var relatedStructSlice reflect.Value
+	relatedModelName := relationSchema.Name
+	err := Model(relatedModelName).Find("UserID $IN", relatedIds).All(&relatedStructSlice)
+	if err != nil {
+		return fmt.Errorf("failed to query related data: %w", err)
+	}
+
+	// 建立映射
+	relatedMap := make(map[uint]reflect.Value)
+	for i := 0; i < relatedStructSlice.Len(); i++ {
+		relatedStruct := relatedStructSlice.Index(i)
+		userIDField := relatedStruct.FieldByName("UserID")
+		if !userIDField.IsValid() || userIDField.Kind() != reflect.Uint {
+			return fmt.Errorf("UserID field not found or invalid in related struct")
+		}
+		relatedMap[uint(userIDField.Uint())] = relatedStruct
+	}
+
+	// 回写字段
+	for i := 0; i < parentSliceValue.Len(); i++ {
+		parentStruct := parentSliceValue.Index(i).Elem()
+		idField := parentStruct.FieldByName("ID")
+		if relatedStruct, ok := relatedMap[uint(idField.Uint())]; ok {
+			relationFieldValue := parentStruct.FieldByName(relationFieldName)
+			if relationFieldValue.Kind() == reflect.Ptr {
+				relationFieldValue.Set(relatedStruct.Addr())
+			} else {
+				relationFieldValue.Set(relatedStruct)
+			}
+		}
+	}
+
+	return nil
+}
+
+// 示例函数：解析字段的Schema（简化版本）
+func ParseSchemaFromField(field reflect.StructField) *Schema {
+	// 此处假设ParseSchema函数已经实现
+	schemas, err := ParseSchema(field.Type)
+	if err != nil || len(schemas) == 0 {
+		return nil
+	}
+	return schemas[0]
 }

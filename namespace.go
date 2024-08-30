@@ -39,7 +39,7 @@ func (ns *Namespace) Connect(config *ConnectConfig) (*Connection, error) {
 	}
 	if config.Name == "" {
 		count := 0
-		ns.connections.Range(func(key, value interface{}) bool {
+		ns.connections.Range(func(key, value any) bool {
 			count++
 			return true
 		})

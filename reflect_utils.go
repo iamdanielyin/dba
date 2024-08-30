@@ -110,28 +110,28 @@ func (ru *ReflectUtils) TypeCategory() TypeCategory {
 }
 
 // CreateEmptyElement 返回切片或数组元素的空值对象
-func (ru *ReflectUtils) CreateEmptyElement() (any, error) {
+func (ru *ReflectUtils) CreateEmptyElement() any {
 	if ru.isArray {
 		elemType := ru.indirectTyp.Elem()
 
 		// 根据元素类型创建相应的空值对象
 		switch elemType.Kind() {
 		case reflect.Struct:
-			return reflect.New(elemType).Elem().Interface(), nil
+			return reflect.New(elemType).Elem().Interface()
 		case reflect.Ptr:
 			if elemType.Elem().Kind() == reflect.Struct {
-				return reflect.New(elemType.Elem()).Interface(), nil
+				return reflect.New(elemType.Elem()).Interface()
 			}
 		case reflect.Map:
 			if elemType.Key().Kind() == reflect.String && elemType.Elem().Kind() == reflect.Interface {
-				return reflect.MakeMap(elemType).Interface(), nil
+				return reflect.MakeMap(elemType).Interface()
 			}
 		default:
-			return reflect.Zero(elemType).Interface(), nil
+			return reflect.Zero(elemType).Interface()
 		}
 	}
 
-	return nil, fmt.Errorf("未知的元素类型")
+	return nil
 }
 
 // CreateEmptyCopy 创建变量a的空副本
@@ -149,22 +149,22 @@ func (ru *ReflectUtils) CreateEmptyCopy() any {
 }
 
 // GetLen 获取数组或切片长度
-func (ru *ReflectUtils) GetLen() (int, error) {
+func (ru *ReflectUtils) GetLen() int {
 	if ru.isArray {
-		return ru.indirectVal.Len(), nil
+		return ru.indirectVal.Len()
 	}
-	return 0, fmt.Errorf("变量a不是切片或数组类型")
+	return 0
 }
 
 // GetElement 获取指定下标的元素
-func (ru *ReflectUtils) GetElement(index int) (any, error) {
+func (ru *ReflectUtils) GetElement(index int) any {
 	if ru.isArray {
 		if index < 0 || index >= ru.indirectVal.Len() {
-			return nil, fmt.Errorf("索引超出范围")
+			return nil
 		}
-		return ru.indirectVal.Index(index).Interface(), nil
+		return ru.indirectVal.Index(index).Interface()
 	}
-	return nil, fmt.Errorf("变量a不是切片或数组类型")
+	return nil
 }
 
 // getStructField 获取指定字段的 reflect.StructField
@@ -711,4 +711,75 @@ func fallbackSetter(ctx context.Context, structField reflect.StructField, value 
 	}
 
 	return
+}
+
+// GetZeroValueOfField 返回字段类型的零值
+func GetZeroValueOfField(input any, fieldName string) (reflect.Value, error) {
+	// 获取输入的反射值
+	v := reflect.ValueOf(input)
+	t := reflect.TypeOf(input)
+
+	// 如果是指针，获取指针指向的值
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+		t = t.Elem()
+	}
+
+	// 处理结构体
+	if v.Kind() == reflect.Struct {
+		fieldVal := v.FieldByName(fieldName)
+		if !fieldVal.IsValid() {
+			return reflect.Value{}, fmt.Errorf("field '%s' not found in struct", fieldName)
+		}
+		return reflect.Zero(fieldVal.Type()), nil
+	}
+
+	// 处理 map
+	if v.Kind() == reflect.Map {
+		keyType := t.Key()
+		elemType := t.Elem()
+
+		// 假设字段名可以作为 map 的 key
+		key := reflect.ValueOf(fieldName)
+		if !key.Type().ConvertibleTo(keyType) {
+			return reflect.Value{}, fmt.Errorf("field name '%s' is not convertible to map key type", fieldName)
+		}
+
+		// 返回 map 元素类型的空值
+		return reflect.Zero(elemType), nil
+	}
+
+	return reflect.Value{}, fmt.Errorf("unsupported type: %s", v.Kind().String())
+}
+
+// GetZeroSliceValueOfField 返回字段值的切片类型的零值
+func GetZeroSliceValueOfField(input any, fieldName string) (reflect.Value, error) {
+	v := reflect.ValueOf(input)
+	t := reflect.TypeOf(input)
+
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+		t = t.Elem()
+	}
+
+	if v.Kind() == reflect.Struct {
+		fieldVal := v.FieldByName(fieldName)
+		if !fieldVal.IsValid() {
+			return reflect.Value{}, fmt.Errorf("field '%s' not found in struct", fieldName)
+		}
+		sliceType := reflect.SliceOf(fieldVal.Type())
+		return reflect.MakeSlice(sliceType, 0, 0), nil
+	}
+
+	if v.Kind() == reflect.Map {
+		elemType := t.Elem()
+		sliceType := reflect.SliceOf(elemType)
+		return reflect.MakeSlice(sliceType, 0, 0), nil
+	}
+
+	return reflect.Value{}, fmt.Errorf("unsupported type: %s", v.Kind().String())
+}
+
+func (receiver) name() {
+
 }
