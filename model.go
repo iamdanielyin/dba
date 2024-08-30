@@ -29,12 +29,21 @@ const (
 	ConflictUpdateComputed ConflictType = "UPDATE_COMPUTED"
 )
 
+type RelationWriteMode string
+
+const (
+	RelationAppend  RelationWriteMode = "APPEND"
+	RelationUpsert  RelationWriteMode = "UPSERT"
+	RelationReplace RelationWriteMode = "REPLACE"
+)
+
 type CreateOptions struct {
 	BatchSize            int
 	SharedTx             bool           // 用于指定是否所有批次共用一个事务
 	ConflictType         ConflictType   // 指定冲突处理方式
 	UpdateColumns        []string       // 在部分更新情况下指定要更新的列
 	ComputedUpdateValues map[string]any // 在计算更新情况下指定更新的值
+	RelationWriteMode    RelationWriteMode
 }
 
 func (dm *DataModel) Create(value any, options ...*CreateOptions) error {
@@ -291,7 +300,6 @@ func (r *Result) Omit(names ...string) *Result {
 
 type PopulateOptions struct {
 	Path      string
-	CustomRel *Relationship
 	Match     *Filter
 	BrgMatch  *Filter
 	Fields    []string
@@ -299,6 +307,7 @@ type PopulateOptions struct {
 	OrderBys  map[string]bool
 	Limit     int
 	Offset    int
+	CustomRel *Relation
 }
 
 func (r *Result) PopulateBy(options ...*PopulateOptions) *Result {
@@ -737,7 +746,7 @@ func autoScan(dst any, xdb *sqlx.DB, sql string, attrs []any) error {
 
 func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) error {
 	field := sch.Fields[opts.Path]
-	rel := field.Relationship
+	rel := field.Relation
 	if opts.CustomRel != nil {
 		rel = opts.CustomRel
 	}
@@ -800,10 +809,10 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 		case HasMany:
 			// TODO 待实现
 
-		case RefOne:
+		case ReferencesOne:
 			// TODO 待实现
 
-		case RefMany:
+		case ReferencesMany:
 			// TODO 待实现
 		default:
 			return fmt.Errorf("unknown relationship: %s.%s[%s]", sch.Name, opts.Path, rel.Type)
@@ -816,10 +825,10 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 		case HasMany:
 			// TODO 待实现
 
-		case RefOne:
+		case ReferencesOne:
 			// TODO 待实现
 
-		case RefMany:
+		case ReferencesMany:
 			// TODO 待实现
 		default:
 			return fmt.Errorf("unknown relationship: %s.%s[%s]", sch.Name, opts.Path, rel.Type)

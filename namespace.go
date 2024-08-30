@@ -118,7 +118,7 @@ func (ns *Namespace) RegisterSchema(value ...any) error {
 		ns.schemas.Store(item.Name, item)
 	}
 	// 所有模型注册完成后，再统一修复引用关系
-	ns.RepairRelationships()
+	ns.RepairRelations()
 	return nil
 }
 
@@ -148,7 +148,7 @@ func (ns *Namespace) Schemas(names ...string) map[string]*Schema {
 	return schemas
 }
 
-func (ns *Namespace) RepairRelationships() {
+func (ns *Namespace) RepairRelations() {
 	schemas := ns.Schemas()
 	for schemaName, s := range schemas {
 		var needUpdate bool
@@ -157,7 +157,7 @@ func (ns *Namespace) RepairRelationships() {
 				rel := parseRel(field.RelConfig, s, field, schemas)
 				if rel != nil {
 					needUpdate = true
-					field.Relationship = rel
+					field.Relation = rel
 				}
 				if field.ItemType != "" {
 					if !scalarTypeMap[SchemaType(field.ItemType)] && schemas[field.ItemType] == nil {

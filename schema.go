@@ -38,13 +38,13 @@ var scalarTypeMap = map[SchemaType]bool{
 	Array:   true,
 }
 
-type RelationshipType string
+type RelationType string
 
 const (
-	HasOne  RelationshipType = "HAS_ONE"
-	HasMany RelationshipType = "HAS_MANY"
-	RefOne  RelationshipType = "REF_ONE"
-	RefMany RelationshipType = "REF_MANY"
+	HasOne         RelationType = "HAS_ONE"         // HasEntity
+	HasMany        RelationType = "HAS_MANY"        // HasEntities
+	ReferencesOne  RelationType = "REFERENCES_ONE"  // ReferencedEntity
+	ReferencesMany RelationType = "REFERENCES_MANY" // ReferencedEntities
 )
 
 type SchemaInterface interface {
@@ -191,18 +191,18 @@ func (s *Schema) NativeFieldNames(names []string, scalarTypeOnly bool) []string 
 }
 
 type Field struct {
-	Name            string        `json:"name,omitempty"`
-	NativeName      string        `json:"native_name,omitempty"`
-	Type            SchemaType    `json:"type,omitempty"`
-	ItemType        string        `json:"item_type,omitempty"`
-	NativeType      string        `json:"native_type,omitempty"`
-	Title           string        `json:"title,omitempty"`
-	Description     null.String   `json:"description,omitempty"`
-	Relationship    *Relationship `json:"relationship,omitempty"`
-	RelConfig       string        `json:"rel_config,omitempty"`
-	IsPrimary       bool          `json:"is_primary"`
-	IsUnsigned      bool          `json:"is_unsigned"`
-	IsAutoIncrement bool          `json:"is_auto_increment"`
+	Name            string      `json:"name,omitempty"`
+	NativeName      string      `json:"native_name,omitempty"`
+	Type            SchemaType  `json:"type,omitempty"`
+	ItemType        string      `json:"item_type,omitempty"`
+	NativeType      string      `json:"native_type,omitempty"`
+	Title           string      `json:"title,omitempty"`
+	Description     null.String `json:"description,omitempty"`
+	Relation        *Relation   `json:"relationship,omitempty"`
+	RelConfig       string      `json:"rel_config,omitempty"`
+	IsPrimary       bool        `json:"is_primary"`
+	IsUnsigned      bool        `json:"is_unsigned"`
+	IsAutoIncrement bool        `json:"is_auto_increment"`
 
 	// TODO 默认值配置实现
 	//DefaultConfig  string
@@ -231,16 +231,16 @@ func (f *Field) IsScalarType() bool {
 func (f *Field) Clone() *Field {
 	copied := new(Field)
 	*copied = *f
-	copied.Relationship = f.Relationship.Clone()
+	copied.Relation = f.Relation.Clone()
 	return copied
 }
 
-type Relationship struct {
-	Type      RelationshipType `json:"kind,omitempty"`
-	SrcSchema string           `json:"src_schema,omitempty"`
-	SrcField  string           `json:"src_field,omitempty"`
-	DstSchema string           `json:"dst_schema,omitempty"`
-	DstField  string           `json:"dst_field,omitempty"`
+type Relation struct {
+	Type      RelationType `json:"kind,omitempty"`
+	SrcSchema string       `json:"src_schema,omitempty"`
+	SrcField  string       `json:"src_field,omitempty"`
+	DstSchema string       `json:"dst_schema,omitempty"`
+	DstField  string       `json:"dst_field,omitempty"`
 
 	BrgSchema   string `json:"brg_schema,omitempty"`
 	BrgSrcField string `json:"brg_src_field,omitempty"`
@@ -248,15 +248,15 @@ type Relationship struct {
 	BrgIsNative bool   `json:"brg_is_native,omitempty"`
 }
 
-func (rs *Relationship) Valid() bool {
+func (rs *Relation) Valid() bool {
 	return rs != nil && rs.Type != ""
 }
 
-func (rs *Relationship) Clone() *Relationship {
+func (rs *Relation) Clone() *Relation {
 	if rs == nil {
 		return nil
 	}
-	copied := new(Relationship)
+	copied := new(Relation)
 	*copied = *rs
 	return copied
 }
@@ -368,13 +368,13 @@ func parseSchema(value any) (*Schema, error) {
 			case "incr":
 				p.IsAutoIncrement = true
 			case "rel":
-				p.Relationship = new(Relationship)
+				p.Relation = new(Relation)
 				p.RelConfig = v
 				if fieldReflectType.Kind() == reflect.Array || fieldReflectType.Kind() == reflect.Slice {
-					p.Relationship.DstSchema = elemType.Name()
+					p.Relation.DstSchema = elemType.Name()
 					p.ItemType = elemType.Name()
 				} else {
-					p.Relationship.DstSchema = fieldReflectType.Name()
+					p.Relation.DstSchema = fieldReflectType.Name()
 				}
 			}
 		}
@@ -454,30 +454,30 @@ func parseFieldType(fieldNewValue any, fieldKind reflect.Kind, p *Field) {
 	}
 }
 
-func parseRel(config string, currentSchema *Schema, currentField *Field, allSchemas map[string]*Schema) *Relationship {
+func parseRel(config string, currentSchema *Schema, currentField *Field, allSchemas map[string]*Schema) *Relation {
 	config = strings.TrimSpace(config)
 
 	var (
-		typ    RelationshipType
+		typ    RelationType
 		others string
 	)
 	if i := strings.Index(config, ","); i <= 0 {
 		return nil
 	} else {
-		typ = RelationshipType(strings.ToUpper(config[:i]))
+		typ = RelationType(strings.ToUpper(config[:i]))
 		others = config[i+1:]
 	}
 
-	rel := Relationship{
+	rel := Relation{
 		Type:      typ,
 		SrcSchema: currentSchema.Name,
 	}
 
-	_ = mergo.Merge(&rel, &currentField.Relationship)
+	_ = mergo.Merge(&rel, &currentField.Relation)
 	switch typ {
 	case HasOne,
 		HasMany,
-		RefOne:
+		ReferencesOne:
 		// HAS_ONE,ID->UserID
 		// HAS_MANY,ID->UserID
 		// REF_ONE,OrgID->ID
@@ -487,7 +487,7 @@ func parseRel(config string, currentSchema *Schema, currentField *Field, allSche
 		}
 		rel.SrcField = split[0]
 		rel.DstField = split[1]
-	case RefMany:
+	case ReferencesMany:
 		// 直接对表：REF_MANY,UserDept(ID->UserID,ID->DeptID)
 		// 对结构体：REF_MANY,user_role_ref(id->user_id,id->role_id)
 		fi := strings.Index(others, "(")
