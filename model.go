@@ -754,24 +754,23 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 	ns := conn.ns
 
 	if ru.isArray {
+		// 1.收集关联的ID
+		var srcValues []any
+		for i := 0; i < ru.GetLen(); i++ {
+			elem := ru.GetElement(i)
+			val, isEmpty := ru.GetFieldOrKey(elem, rel.SrcField)
+			if !isEmpty {
+				continue
+			}
+			srcValues = append(srcValues, val)
+		}
 		switch rel.Type {
 		case HasOne:
-			// 1.收集关联的ID
-			var srcValues []any
-			for i := 0; i < ru.GetLen(); i++ {
-				elem := ru.GetElement(i)
-				val, isEmpty := ru.GetFieldOrKey(elem, rel.SrcField)
-				if !isEmpty {
-					continue
-				}
-				srcValues = append(srcValues, val)
-			}
-			emptyElem := ru.CreateEmptyElement()
-			relatedSlice, err := GetZeroSliceValueOfField(emptyElem, opts.Path)
+			// 2.统一查询关联数据
+			relatedSlice, err := GetZeroSliceValueOfField(ru.CreateEmptyElement(), opts.Path)
 			if err != nil {
 				return err
 			}
-			// 2.统一查询关联数据
 			RelatedModel := ns.ModelBy(conn.name, rel.DstSchema)
 			if err := RelatedModel.Find(fmt.Sprintf("%s $IN", rel.DstField), srcValues).All(reflect.Indirect(relatedSlice).Addr().Interface()); err != nil {
 				return err
