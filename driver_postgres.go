@@ -16,7 +16,7 @@ func (m *postgresDriver) Connect(config *ConnectConfig) (*sqlx.DB, error) {
 	return sqlx.Connect(m.Name(), config.Dsn)
 }
 
-func (m *postgresDriver) GenDDL(sortedNames []string, schemas map[string]*Schema, ignoreComments ...bool) string {
+func (m *postgresDriver) GenDDL(sortedNames []string, schs map[string]*Schema, ignoreComments ...bool) string {
 	//TODO implement me
 	panic("implement me")
 }

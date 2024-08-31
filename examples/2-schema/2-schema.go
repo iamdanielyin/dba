@@ -39,7 +39,7 @@ func main() {
 		"Permission",
 	}
 	for _, name := range schemaNames {
-		ModelSchema := dba.LookupSchema(name)
+		ModelSchema := dba.SchemaBy(name)
 		log.Println(ModelSchema.Name, ModelSchema.NativeName)
 	}
 }

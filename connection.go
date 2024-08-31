@@ -22,13 +22,13 @@ type Connection struct {
 	QueryTemplate  *template.Template
 }
 
-func (c *Connection) Init(schemas ...map[string]*Schema) error {
+func (c *Connection) Init(schs ...map[string]*Schema) error {
 	var ss map[string]*Schema
-	if len(schemas) > 0 {
-		ss = schemas[0]
+	if len(schs) > 0 {
+		ss = schs[0]
 	}
 	if ss == nil {
-		ss = c.ns.Schemas()
+		ss = c.ns.LookupSchema()
 	}
 	ddl := c.GenDDL(ss)
 	if ddl != "" {
@@ -38,13 +38,13 @@ func (c *Connection) Init(schemas ...map[string]*Schema) error {
 	return nil
 }
 
-func (c *Connection) GenDDL(schemas map[string]*Schema, ignoreComments ...bool) string {
+func (c *Connection) GenDDL(schs map[string]*Schema, ignoreComments ...bool) string {
 	var sortedNames []string
-	for name := range schemas {
+	for name := range schs {
 		sortedNames = append(sortedNames, name)
 	}
 	sort.Strings(sortedNames)
-	return c.driver.GenDDL(sortedNames, schemas, ignoreComments...)
+	return c.driver.GenDDL(sortedNames, schs, ignoreComments...)
 }
 
 func (c *Connection) Query(dst any, query string, args ...any) error {

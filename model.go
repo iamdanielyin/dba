@@ -774,28 +774,29 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 			srcValues = append(srcValues, val)
 		}
 		switch rel.Type {
-		case HasOne:
+		case HasOne, ReferencesOne:
 			// 2.统一查询关联数据
-			relatedSlice, err := GetZeroSliceValueOfField(ru.CreateEmptyElement(), opts.Path)
+			DstModel := ns.ModelBy(conn.name, rel.DstSchema)
+			dstSliceRef, err := GetZeroSliceValueOfField(ru.CreateEmptyElement(), opts.Path)
 			if err != nil {
 				return err
 			}
-			RelatedModel := ns.ModelBy(conn.name, rel.DstSchema)
-			if err := RelatedModel.Find(fmt.Sprintf("%s $IN", rel.DstField), srcValues).All(reflect.Indirect(relatedSlice).Addr().Interface()); err != nil {
+			if err := DstModel.Find(fmt.Sprintf("%s $IN", rel.DstField), srcValues).All(dstSliceRef.Addr().Interface()); err != nil {
 				return err
 			}
 			// 3.建立映射
-			relatedMap := make(map[any]any)
-			for i := 0; i < relatedSlice.Len(); i++ {
-				ruElem, err := NewReflectUtils(reflect.Indirect(relatedSlice.Index(i)).Addr().Interface())
+			dstIdMapRef := make(map[any]*reflect.Value)
+			for i := 0; i < dstSliceRef.Len(); i++ {
+				re, err := NewReflectUtils(dstSliceRef.Index(i).Interface())
 				if err != nil {
 					continue
 				}
-				result, isEmpty := ruElem.GetFieldOrKey(ruElem.Raw(), rel.DstField)
+				dstId, isEmpty := re.GetFieldOrKey(re.Raw(), rel.DstField)
 				if isEmpty {
 					continue
 				}
-				relatedMap[result] = ruElem.Raw()
+				tmp := re.Value()
+				dstIdMapRef[dstId] = &tmp
 			}
 			// 4.回写字段
 			for i := 0; i < ru.GetLen(); i++ {
@@ -804,18 +805,115 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 				if !isEmpty {
 					continue
 				}
-				_ = ru.SetFieldOrKey(elem, opts.Path, relatedMap[val])
+				_ = ru.SetFieldOrKey(elem, opts.Path, dstIdMapRef[val].Interface())
 			}
 		case HasMany:
-			// TODO 待实现
-
-		case ReferencesOne:
-			// TODO 待实现
+			// 1.收集关联的ID
+			//（同上）
+			// 2.统一查询关联数据
+			DstModel := ns.ModelBy(conn.name, rel.DstSchema)
+			dstSliceRef, err := GetZeroSliceValueOfField(ru.CreateEmptyElement(), opts.Path)
+			if err != nil {
+				return err
+			}
+			if err := DstModel.Find(fmt.Sprintf("%s $IN", rel.DstField), srcValues).All(dstSliceRef.Addr().Interface()); err != nil {
+				return err
+			}
+			// 3.建立映射
+			dstIdMapRef := make(map[any]*reflect.Value)
+			for i := 0; i < dstSliceRef.Len(); i++ {
+				re, err := NewReflectUtils(reflect.Indirect(dstSliceRef.Index(i)).Addr().Interface())
+				if err != nil {
+					continue
+				}
+				dstId, isEmpty := re.GetFieldOrKey(re.Raw(), rel.DstField)
+				if isEmpty {
+					continue
+				}
+				if dstIdMapRef[dstId] == nil {
+					valuesRef, _ := GetZeroSliceValueOfField(ru.CreateEmptyElement(), opts.Path)
+					dstIdMapRef[dstId] = &valuesRef
+				}
+				newValuesRef := reflect.Append(*dstIdMapRef[dstId], re.IndirectVal())
+				dstIdMapRef[dstId] = &newValuesRef
+			}
+			// 4.回写字段
+			for i := 0; i < ru.GetLen(); i++ {
+				elem := ru.GetElement(i)
+				val, isEmpty := ru.GetFieldOrKey(elem, rel.SrcField)
+				if !isEmpty {
+					continue
+				}
+				_ = ru.SetFieldOrKey(elem, opts.Path, dstIdMapRef[val].Interface())
+			}
 
 		case ReferencesMany:
-			// TODO 待实现
+			// 1.收集关联的ID
+			//（同上）
+			// 2.统一查询关联数据
+			var allBrgData any
+			if rel.BrgIsNative {
+				allBrgData = make([]map[string]any, 0)
+				if err := conn.Query(&allBrgData, fmt.Sprintf(`SELECT * FROM %s WHERE %s IN (?)`, rel.BrgSchema, rel.BrgSrcField), srcValues); err != nil {
+					return err
+				}
+				var allDstIds []any
+				for _, v := range allBrgData.([]map[string]any) {
+					allDstIds = append(allDstIds, v[rel.BrgDstField])
+				}
+				DstModel := ns.ModelBy(conn.name, rel.DstSchema)
+				allDstSliceRef, err := GetZeroSliceValueOfField(ru.CreateEmptyElement(), opts.Path)
+				if err != nil {
+					return err
+				}
+				if err := DstModel.Find(fmt.Sprintf("%s $IN", rel.DstField), allDstIds).All(allDstSliceRef.Addr().Interface()); err != nil {
+					return err
+				}
+				allDstIdMapRef := make(map[any]*reflect.Value)
+				for i := 0; i < allDstSliceRef.Len(); i++ {
+					re, err := NewReflectUtils(allDstSliceRef.Index(i).Interface())
+					if err != nil {
+						continue
+					}
+					dstId, isEmpty := re.GetFieldOrKey(re.Raw(), rel.DstField)
+					if isEmpty {
+						continue
+					}
+					tmp := re.Value()
+					allDstIdMapRef[dstId] = &tmp
+				}
+				// 3.建立映射
+				dstIdMapRef := make(map[any]*reflect.Value)
+				for _, v := range allBrgData.([]map[string]any) {
+					srcIdValue := v[rel.BrgSrcField]
+					dstIdValue := v[rel.BrgDstField]
+					dstDataRef := allDstIdMapRef[dstIdValue]
+					if dstDataRef == nil {
+						continue
+					}
+					if dstIdMapRef[srcIdValue] == nil {
+						valuesRef, _ := GetZeroSliceValueOfField(ru.CreateEmptyElement(), opts.Path)
+						dstIdMapRef[srcIdValue] = &valuesRef
+					}
+					tmp := reflect.Append(*dstIdMapRef[srcIdValue], *dstDataRef)
+					dstIdMapRef[srcIdValue] = &tmp
+
+				}
+				// 4.回写字段
+				for i := 0; i < ru.GetLen(); i++ {
+					elem := ru.GetElement(i)
+					srcId, isEmpty := ru.GetFieldOrKey(elem, rel.SrcField)
+					if !isEmpty {
+						continue
+					}
+					_ = ru.SetFieldOrKey(elem, opts.Path, dstIdMapRef[srcId].Interface())
+				}
+			} else {
+				//allBrgData = make([]map[string]any, 0)
+				//brgSch := ns.SchemaBy(rel.BrgSchema)
+			}
 		default:
-			return fmt.Errorf("unknown relationship: %s.%s[%s]", sch.Name, opts.Path, rel.Type)
+			return fmt.Errorf("unknown relation: %s.%s[%s]", sch.Name, opts.Path, rel.Type)
 		}
 	} else {
 		switch rel.Type {
@@ -831,7 +929,7 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 		case ReferencesMany:
 			// TODO 待实现
 		default:
-			return fmt.Errorf("unknown relationship: %s.%s[%s]", sch.Name, opts.Path, rel.Type)
+			return fmt.Errorf("unknown relation: %s.%s[%s]", sch.Name, opts.Path, rel.Type)
 		}
 	}
 

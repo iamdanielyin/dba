@@ -32,12 +32,12 @@ func RegisterSchema(values ...any) error {
 	return DefaultNamespace.RegisterSchema(values...)
 }
 
-func LookupSchema(name string) *Schema {
-	return DefaultNamespace.LookupSchema(name)
+func SchemaBy(name string) *Schema {
+	return DefaultNamespace.SchemaBy(name)
 }
 
-func Schemas(name ...string) map[string]*Schema {
-	return DefaultNamespace.Schemas(name...)
+func LookupSchema(name ...string) map[string]*Schema {
+	return DefaultNamespace.LookupSchema(name...)
 }
 
 func Model(schemaName string) *DataModel {

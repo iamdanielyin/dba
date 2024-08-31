@@ -157,16 +157,16 @@ func main() {
 	if err := Role.Find("ID $IN", allRoleIds).All(&allRoles); err != nil {
 		log.Fatal(err)
 	}
-	roleMap := make(map[uint]*examples.Role)
+	allRoleMap := make(map[uint]*examples.Role)
 	for _, role := range allRoles {
-		roleMap[role.ID] = role
+		allRoleMap[role.ID] = role
 	}
 	// 3.建立映射
 	userRolesMap := make(map[uint][]*examples.Role)
 	for _, brg := range allBrgData {
 		userId := brg["user_id"].(uint)
 		roleId := brg["role_id"].(uint)
-		role := roleMap[roleId]
+		role := allRoleMap[roleId]
 		if role == nil {
 			continue
 		}

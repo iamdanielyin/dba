@@ -5,12 +5,6 @@ import (
 	"time"
 )
 
-type Org struct {
-	Model
-	Code string
-	Name string
-}
-
 type User struct {
 	ID          uint        `dba:"pk;incr"`
 	Nickname    string      `dba:"title=用户昵称"`
@@ -37,6 +31,12 @@ type Account struct {
 	Username string `dba:"title=账户名称"`
 	Password string `dba:"title=账户密码"`
 	Remark   string `dba:"title=备注;type=text"`
+}
+
+type Org struct {
+	Model
+	Code string
+	Name string
 }
 
 type Dept struct {

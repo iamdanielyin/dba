@@ -26,10 +26,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	allSchemas := dba.Schemas()
-	_ = os.WriteFile("schemas.json", []byte(dba.JSONStringify(allSchemas, true)), os.ModePerm)
+	schs := dba.LookupSchema()
+	_ = os.WriteFile("schs.json", []byte(dba.JSONStringify(schs, true)), os.ModePerm)
 
-	if ddl := dba.Session().GenDDL(allSchemas); ddl != "" {
+	if ddl := dba.Session().GenDDL(schs); ddl != "" {
 		_ = dba.EnsureDir("migrations")
 		_ = os.WriteFile(fmt.Sprintf("migrations/%s.sql", time.Now().Format("20060102150405")), []byte(ddl), os.ModePerm)
 	}

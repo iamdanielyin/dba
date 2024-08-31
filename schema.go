@@ -198,8 +198,8 @@ type Field struct {
 	NativeType      string      `json:"native_type,omitempty"`
 	Title           string      `json:"title,omitempty"`
 	Description     null.String `json:"description,omitempty"`
-	Relation        *Relation   `json:"relationship,omitempty"`
-	RelConfig       string      `json:"rel_config,omitempty"`
+	Relation        *Relation   `json:"relation,omitempty"`
+	RelationConfig  string      `json:"relation_config,omitempty"`
 	IsPrimary       bool        `json:"is_primary"`
 	IsUnsigned      bool        `json:"is_unsigned"`
 	IsAutoIncrement bool        `json:"is_auto_increment"`
@@ -369,7 +369,7 @@ func parseSchema(value any) (*Schema, error) {
 				p.IsAutoIncrement = true
 			case "rel":
 				p.Relation = new(Relation)
-				p.RelConfig = v
+				p.RelationConfig = v
 				if fieldReflectType.Kind() == reflect.Array || fieldReflectType.Kind() == reflect.Slice {
 					p.Relation.DstSchema = elemType.Name()
 					p.ItemType = elemType.Name()
@@ -454,7 +454,7 @@ func parseFieldType(fieldNewValue any, fieldKind reflect.Kind, p *Field) {
 	}
 }
 
-func parseRel(config string, currentSchema *Schema, currentField *Field, allSchemas map[string]*Schema) *Relation {
+func parseRelation(config string, currentSchema *Schema, currentField *Field, schs map[string]*Schema) *Relation {
 	config = strings.TrimSpace(config)
 
 	var (
@@ -508,7 +508,7 @@ func parseRel(config string, currentSchema *Schema, currentField *Field, allSche
 				}
 			}
 		}
-		if _, has := allSchemas[rel.BrgSchema]; has {
+		if _, has := schs[rel.BrgSchema]; has {
 			rel.BrgIsNative = false
 		} else {
 			rel.BrgIsNative = true

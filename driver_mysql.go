@@ -19,10 +19,10 @@ func (m *mysqlDriver) Connect(config *ConnectConfig) (*sqlx.DB, error) {
 	return sqlx.Connect(m.Name(), config.Dsn)
 }
 
-func (m *mysqlDriver) GenDDL(sortedNames []string, schemas map[string]*Schema, ignoreComments ...bool) string {
+func (m *mysqlDriver) GenDDL(sortedNames []string, schs map[string]*Schema, ignoreComments ...bool) string {
 	var ddls []string
 	for _, name := range sortedNames {
-		sch := schemas[name]
+		sch := schs[name]
 		var (
 			columns        []string
 			primaryColumns []string

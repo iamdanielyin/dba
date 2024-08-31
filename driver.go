@@ -17,7 +17,7 @@ var drivers = map[string]Driver{
 type Driver interface {
 	Name() string
 	Connect(config *ConnectConfig) (*sqlx.DB, error)
-	GenDDL(sortedNames []string, schemas map[string]*Schema, ignoreComments ...bool) string
+	GenDDL(sortedNames []string, schs map[string]*Schema, ignoreComments ...bool) string
 	CreateClauses() string
 	DeleteClauses() string
 	UpdateClauses() string

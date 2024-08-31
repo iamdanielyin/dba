@@ -117,12 +117,12 @@ func (ns *Namespace) RegisterSchema(value ...any) error {
 	for _, item := range ss {
 		ns.schemas.Store(item.Name, item)
 	}
-	// 所有模型注册完成后，再统一修复引用关系
-	ns.RepairRelations()
+	// 所有模型注册完成后，再统一设置引用关系
+	ns.setRelations()
 	return nil
 }
 
-func (ns *Namespace) LookupSchema(name string) *Schema {
+func (ns *Namespace) SchemaBy(name string) *Schema {
 	s, ok := ns.schemas.Load(name)
 	if !ok {
 		return nil
@@ -131,36 +131,36 @@ func (ns *Namespace) LookupSchema(name string) *Schema {
 	return original.Clone()
 }
 
-func (ns *Namespace) Schemas(names ...string) map[string]*Schema {
+func (ns *Namespace) LookupSchema(names ...string) map[string]*Schema {
 	nameMap := make(map[string]bool)
 	for _, name := range names {
 		nameMap[name] = true
 	}
-	schemas := make(map[string]*Schema)
+	schs := make(map[string]*Schema)
 	ns.schemas.Range(func(key, value any) bool {
 		copied := value.(*Schema).Clone()
 		name := key.(string)
 		if len(nameMap) == 0 || nameMap[name] {
-			schemas[name] = copied
+			schs[name] = copied
 		}
 		return true
 	})
-	return schemas
+	return schs
 }
 
-func (ns *Namespace) RepairRelations() {
-	schemas := ns.Schemas()
-	for schemaName, s := range schemas {
+func (ns *Namespace) setRelations() {
+	schs := ns.LookupSchema()
+	for schemaName, s := range schs {
 		var needUpdate bool
 		for fieldName, field := range s.Fields {
-			if field.RelConfig != "" {
-				rel := parseRel(field.RelConfig, s, field, schemas)
+			if field.RelationConfig != "" {
+				rel := parseRelation(field.RelationConfig, s, field, schs)
 				if rel != nil {
 					needUpdate = true
 					field.Relation = rel
 				}
 				if field.ItemType != "" {
-					if !scalarTypeMap[SchemaType(field.ItemType)] && schemas[field.ItemType] == nil {
+					if !scalarTypeMap[SchemaType(field.ItemType)] && schs[field.ItemType] == nil {
 						field.ItemType = ""
 					}
 				}
@@ -179,13 +179,13 @@ func (ns *Namespace) Model(schemaName string) *DataModel {
 }
 
 func (ns *Namespace) Init(connectionName ...string) error {
-	schemas := ns.Schemas()
+	schs := ns.LookupSchema()
 	if len(connectionName) == 0 {
 		connectionName = append(connectionName, "")
 	}
 	for _, name := range connectionName {
 		conn := ns.Session(name)
-		ddl := conn.GenDDL(schemas, true)
+		ddl := conn.GenDDL(schs, true)
 		if _, err := conn.Exec(ddl); err != nil {
 			return err
 		}
@@ -199,7 +199,7 @@ func (ns *Namespace) ModelBy(connectionName, schemaName string) *DataModel {
 		panic(fmt.Errorf("connection not exists: %s", connectionName))
 	}
 
-	s := ns.LookupSchema(schemaName)
+	s := ns.SchemaBy(schemaName)
 	if s == nil {
 		panic(fmt.Errorf("schema not exists: %s", schemaName))
 	}
