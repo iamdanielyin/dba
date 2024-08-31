@@ -183,28 +183,14 @@ func main() {
 	// --------------------------------
 	// 1.收集id（同上）
 	// 2.统一查询
-	var allBrgSchema []*examples.UserDept
+	var allBrgSchData []*examples.UserDept
 	UserDept := dba.Model("UserDept")
-	if err := UserDept.Find("UserID $IN", userIds).All(&allBrgSchema); err != nil {
+	if err := UserDept.Find("UserID $IN", userIds).All(&allBrgSchData); err != nil {
 		log.Fatal(err)
-	}
-	var allDeptIds []uint
-	for _, brg := range allBrgSchema {
-		allDeptIds = append(allDeptIds, brg.DeptID)
-	}
-	Dept := dba.Model("Dept")
-	var allDepts []*examples.Dept
-	if err := Dept.Find("ID $IN", allDeptIds).All(&allDepts); err != nil {
-		log.Fatal(err)
-	}
-	deptMap := make(map[uint]*examples.Dept)
-	for _, dept := range allDepts {
-		deptMap[dept.ID] = dept
 	}
 	// 3.建立映射
 	userDeptsMap := make(map[uint][]*examples.UserDept)
-	for _, brg := range allBrgSchema {
-		brg.Dept = deptMap[brg.DeptID]
+	for _, brg := range allBrgSchData {
 		userDeptsMap[brg.UserID] = append(userDeptsMap[brg.UserID], brg)
 	}
 	// 4.回写字段

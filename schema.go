@@ -237,6 +237,7 @@ func (f *Field) Clone() *Field {
 
 type Relation struct {
 	Type      RelationType `json:"kind,omitempty"`
+	Field     string       `json:"data_field,omitempty"`
 	SrcSchema string       `json:"src_schema,omitempty"`
 	SrcField  string       `json:"src_field,omitempty"`
 	DstSchema string       `json:"dst_schema,omitempty"`
@@ -376,6 +377,7 @@ func parseSchema(value any) (*Schema, error) {
 				} else {
 					p.Relation.DstSchema = fieldReflectType.Name()
 				}
+				p.Relation.Field = p.Name
 			}
 		}
 		parseFieldType(fieldNewValue, fieldKind, p)

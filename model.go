@@ -850,15 +850,14 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 		case ReferencesMany:
 			// 1.收集关联的ID
 			//（同上）
-			// 2.统一查询关联数据
-			var allBrgData any
 			if rel.BrgIsNative {
-				allBrgData = make([]map[string]any, 0)
+				// 2.统一查询关联数据
+				var allBrgData = make([]map[string]any, 0)
 				if err := conn.Query(&allBrgData, fmt.Sprintf(`SELECT * FROM %s WHERE %s IN (?)`, rel.BrgSchema, rel.BrgSrcField), srcValues); err != nil {
 					return err
 				}
 				var allDstIds []any
-				for _, v := range allBrgData.([]map[string]any) {
+				for _, v := range allBrgData {
 					allDstIds = append(allDstIds, v[rel.BrgDstField])
 				}
 				DstModel := ns.ModelBy(conn.name, rel.DstSchema)
@@ -884,7 +883,7 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 				}
 				// 3.建立映射
 				dstIdMapRef := make(map[any]*reflect.Value)
-				for _, v := range allBrgData.([]map[string]any) {
+				for _, v := range allBrgData {
 					srcIdValue := v[rel.BrgSrcField]
 					dstIdValue := v[rel.BrgDstField]
 					dstDataRef := allDstIdMapRef[dstIdValue]
@@ -909,8 +908,43 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 					_ = ru.SetFieldOrKey(elem, opts.Path, dstIdMapRef[srcId].Interface())
 				}
 			} else {
-				//allBrgData = make([]map[string]any, 0)
-				//brgSch := ns.SchemaBy(rel.BrgSchema)
+				// 2.统一查询关联数据
+				BrgModel := ns.ModelBy(conn.name, rel.BrgSchema)
+				allBrgSliceRef, err := GetZeroSliceValueOfField(ru.CreateEmptyElement(), opts.Path)
+				if err != nil {
+					return err
+				}
+				if err := BrgModel.Find(fmt.Sprintf("%s $IN", rel.BrgSrcField), srcValues).All(allBrgSliceRef.Addr().Interface()); err != nil {
+					return err
+				}
+				// 3.建立映射
+				srcIdBrgMapRef := make(map[any]*reflect.Value)
+				for i := 0; i < allBrgSliceRef.Len(); i++ {
+					re, err := NewReflectUtils(allBrgSliceRef.Index(i).Interface())
+					if err != nil {
+						continue
+					}
+					brgSrcId, isEmpty := re.GetFieldOrKey(re.Raw(), rel.BrgSrcField)
+					if isEmpty {
+						continue
+					}
+
+					if srcIdBrgMapRef[brgSrcId] == nil {
+						valuesRef, _ := GetZeroSliceValueOfField(ru.CreateEmptyElement(), opts.Path)
+						srcIdBrgMapRef[brgSrcId] = &valuesRef
+					}
+					tmp := reflect.Append(*srcIdBrgMapRef[brgSrcId], re.Value())
+					srcIdBrgMapRef[brgSrcId] = &tmp
+				}
+				// 4.回写字段
+				for i := 0; i < ru.GetLen(); i++ {
+					elem := ru.GetElement(i)
+					srcId, isEmpty := ru.GetFieldOrKey(elem, rel.SrcField)
+					if !isEmpty {
+						continue
+					}
+					_ = ru.SetFieldOrKey(elem, opts.Path, srcIdBrgMapRef[srcId].Interface())
+				}
 			}
 		default:
 			return fmt.Errorf("unknown relation: %s.%s[%s]", sch.Name, opts.Path, rel.Type)
