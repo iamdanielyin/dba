@@ -562,16 +562,16 @@ func (r *Result) afterQuery(dst any) error {
 				opts = new(PopulateOptions)
 			}
 			opts.Path = p
-			// 生成opts
+			ru, err := NewReflectUtils(docs)
+			if err != nil {
+				return err
+			}
 			if i != 0 {
-				ru, err := NewReflectUtils(dst)
-				if err != nil {
-					return err
-				}
 				res, isEmpty := ru.GetFieldOrKey(ru.Raw(), opts.Path)
 				if isEmpty {
 					continue
 				}
+				docs = res
 				field := sch.Fields[opts.Path]
 				rel := field.Relation
 				if opts.CustomRel != nil {
@@ -586,10 +586,24 @@ func (r *Result) afterQuery(dst any) error {
 				if sch == nil {
 					continue
 				}
-				docs = res
 			}
-			if _, err := populate(docs, r.dm.conn, sch, opts); err != nil {
+			fru, err := NewReflectUtils(docs)
+			if err != nil {
 				return err
+			}
+			if fru.Value().CanAddr() {
+				if res, err := populate(fru.IndirectVal().Addr().Interface(), r.dm.conn, sch, opts); err != nil {
+					return err
+				} else {
+					if err := ru.SetFieldOrKey(ru.Raw(), opts.Path, res); err != nil {
+						return err
+					}
+				}
+			} else {
+				if _, err := populate(docs, r.dm.conn, sch, opts); err != nil {
+					return err
+				}
+
 			}
 		}
 	}
