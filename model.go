@@ -290,16 +290,25 @@ func (r *Result) Offset(offset int) *Result {
 	return r
 }
 
-func (r *Result) Select(names ...string) *Result {
+func (r *Result) WithFields(names []string, isOmit bool) *Result {
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		r.fields = append(r.fields, name)
+	}
 	r.fields = names
 	r.isOmit = false
 	return r
 }
 
+func (r *Result) Select(names ...string) *Result {
+	return r.WithFields(names, false)
+}
+
 func (r *Result) Omit(names ...string) *Result {
-	r.fields = names
-	r.isOmit = true
-	return r
+	return r.WithFields(names, true)
 }
 
 type PopulateOptions struct {
@@ -340,13 +349,15 @@ func (r *Result) Populate(names ...string) *Result {
 func (r *Result) orderBy(isDesc bool, names []string) *Result {
 	for _, name := range names {
 		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
 		r.orderBys[name] = isDesc
 	}
 	return r
 }
 
 func parseWhere(sch *Schema, filters []*Filter) (string, []any) {
-
 	if len(filters) > 0 {
 		var setItem func(filterOperator, []*Filter) (string, []any)
 		setItem = func(sfo filterOperator, sfs []*Filter) (string, []any) {
@@ -836,7 +847,7 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) (an
 		if err != nil {
 			return dst, err
 		}
-		if err := DstModel.Find(fmt.Sprintf("%s $IN", rel.DstField), srcValues).Where().All(dstSliceRef.Addr().Interface()); err != nil {
+		if err := DstModel.Find(fmt.Sprintf("%s $IN", rel.DstField), srcValues).All(dstSliceRef.Addr().Interface()); err != nil {
 			return dst, err
 		}
 		// 3.建立映射
