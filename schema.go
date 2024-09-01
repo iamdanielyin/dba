@@ -38,13 +38,13 @@ var scalarTypeMap = map[SchemaType]bool{
 	Array:   true,
 }
 
-type RelationType string
+type RelationKind string
 
 const (
-	HasOne         RelationType = "HAS_ONE"         // HasEntity
-	HasMany        RelationType = "HAS_MANY"        // HasEntities
-	ReferencesOne  RelationType = "REFERENCES_ONE"  // ReferencedEntity
-	ReferencesMany RelationType = "REFERENCES_MANY" // ReferencedEntities
+	HasOne         RelationKind = "HAS_ONE"         // HasEntity
+	HasMany        RelationKind = "HAS_MANY"        // HasEntities
+	ReferencesOne  RelationKind = "REFERENCES_ONE"  // ReferencedEntity
+	ReferencesMany RelationKind = "REFERENCES_MANY" // ReferencedEntities
 )
 
 type SchemaInterface interface {
@@ -236,8 +236,8 @@ func (f *Field) Clone() *Field {
 }
 
 type Relation struct {
-	Type      RelationType `json:"kind,omitempty"`
-	Field     string       `json:"data_field,omitempty"`
+	Kind      RelationKind `json:"kind,omitempty"`
+	Field     string       `json:"field,omitempty"`
 	SrcSchema string       `json:"src_schema,omitempty"`
 	SrcField  string       `json:"src_field,omitempty"`
 	DstSchema string       `json:"dst_schema,omitempty"`
@@ -250,7 +250,7 @@ type Relation struct {
 }
 
 func (rs *Relation) Valid() bool {
-	return rs != nil && rs.Type != ""
+	return rs != nil && rs.Kind != ""
 }
 
 func (rs *Relation) Clone() *Relation {
@@ -460,23 +460,23 @@ func parseRelation(config string, currentSchema *Schema, currentField *Field, sc
 	config = strings.TrimSpace(config)
 
 	var (
-		typ    RelationType
+		kind   RelationKind
 		others string
 	)
 	if i := strings.Index(config, ","); i <= 0 {
 		return nil
 	} else {
-		typ = RelationType(strings.ToUpper(config[:i]))
+		kind = RelationKind(strings.ToUpper(config[:i]))
 		others = config[i+1:]
 	}
 
 	rel := Relation{
-		Type:      typ,
+		Kind:      kind,
 		SrcSchema: currentSchema.Name,
 	}
 
 	_ = mergo.Merge(&rel, &currentField.Relation)
-	switch typ {
+	switch kind {
 	case HasOne,
 		HasMany,
 		ReferencesOne:

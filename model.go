@@ -547,16 +547,49 @@ func (r *Result) beforeQuery() (map[string]any, []any) {
 
 func (r *Result) afterQuery(dst any) error {
 	sch := r.dm.schema
+	docs := dst
 	for _, item := range r.populates {
 		paths := strings.Split(item.Path, ".")
 		for i, p := range paths {
+			if sch == nil {
+				continue
+			}
+			// 生成opts
+			var opts *PopulateOptions
 			if i == len(paths)-1 {
-				_ = populate(dst, r.dm.conn, sch, &PopulateOptions{
-					Path: p,
-				})
+				opts = item
 			} else {
-				item.Path = p
-				_ = populate(dst, r.dm.conn, sch, item)
+				opts = new(PopulateOptions)
+			}
+			opts.Path = p
+			// 生成opts
+			if i != 0 {
+				ru, err := NewReflectUtils(dst)
+				if err != nil {
+					return err
+				}
+				res, isEmpty := ru.GetFieldOrKey(ru.Raw(), opts.Path)
+				if isEmpty {
+					continue
+				}
+				field := sch.Fields[opts.Path]
+				rel := field.Relation
+				if opts.CustomRel != nil {
+					rel = opts.CustomRel
+				}
+				switch rel.Kind {
+				case ReferencesMany:
+					sch = r.dm.conn.ns.SchemaBy(rel.BrgSchema)
+				default:
+					sch = r.dm.conn.ns.SchemaBy(rel.DstSchema)
+				}
+				if sch == nil {
+					continue
+				}
+				docs = res
+			}
+			if _, err := populate(docs, r.dm.conn, sch, opts); err != nil {
+				return err
 			}
 		}
 	}
@@ -744,7 +777,7 @@ func autoScan(dst any, xdb *sqlx.DB, sql string, attrs []any) error {
 	return nil
 }
 
-func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) error {
+func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) (any, error) {
 	field := sch.Fields[opts.Path]
 	rel := field.Relation
 	if opts.CustomRel != nil {
@@ -752,12 +785,12 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 	}
 
 	if !field.Valid() || rel == nil {
-		return fmt.Errorf("populate field failed: %s.%s", sch.Name, opts.Path)
+		return dst, fmt.Errorf("populate field failed: %s.%s", sch.Name, opts.Path)
 	}
 
 	ru, err := NewReflectUtils(dst)
 	if err != nil {
-		return err
+		return dst, err
 	}
 
 	ns := conn.ns
@@ -773,16 +806,16 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 			}
 			srcValues = append(srcValues, val)
 		}
-		switch rel.Type {
+		switch rel.Kind {
 		case HasOne, ReferencesOne:
 			// 2.统一查询关联数据
 			DstModel := ns.ModelBy(conn.name, rel.DstSchema)
 			dstSliceRef, err := GetZeroSliceValueOfField(ru.CreateEmptyElement(), opts.Path)
 			if err != nil {
-				return err
+				return dst, err
 			}
 			if err := DstModel.Find(fmt.Sprintf("%s $IN", rel.DstField), srcValues).All(dstSliceRef.Addr().Interface()); err != nil {
-				return err
+				return dst, err
 			}
 			// 3.建立映射
 			dstIdMapRef := make(map[any]*reflect.Value)
@@ -814,10 +847,10 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 			DstModel := ns.ModelBy(conn.name, rel.DstSchema)
 			dstSliceRef, err := GetZeroSliceValueOfField(ru.CreateEmptyElement(), opts.Path)
 			if err != nil {
-				return err
+				return dst, err
 			}
 			if err := DstModel.Find(fmt.Sprintf("%s $IN", rel.DstField), srcValues).All(dstSliceRef.Addr().Interface()); err != nil {
-				return err
+				return dst, err
 			}
 			// 3.建立映射
 			dstIdMapRef := make(map[any]*reflect.Value)
@@ -854,7 +887,7 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 				// 2.统一查询关联数据
 				var allBrgData = make([]map[string]any, 0)
 				if err := conn.Query(&allBrgData, fmt.Sprintf(`SELECT * FROM %s WHERE %s IN (?)`, rel.BrgSchema, rel.BrgSrcField), srcValues); err != nil {
-					return err
+					return dst, err
 				}
 				var allDstIds []any
 				for _, v := range allBrgData {
@@ -863,10 +896,10 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 				DstModel := ns.ModelBy(conn.name, rel.DstSchema)
 				allDstSliceRef, err := GetZeroSliceValueOfField(ru.CreateEmptyElement(), opts.Path)
 				if err != nil {
-					return err
+					return dst, err
 				}
 				if err := DstModel.Find(fmt.Sprintf("%s $IN", rel.DstField), allDstIds).All(allDstSliceRef.Addr().Interface()); err != nil {
-					return err
+					return dst, err
 				}
 				allDstIdMapRef := make(map[any]*reflect.Value)
 				for i := 0; i < allDstSliceRef.Len(); i++ {
@@ -912,10 +945,10 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 				BrgModel := ns.ModelBy(conn.name, rel.BrgSchema)
 				allBrgSliceRef, err := GetZeroSliceValueOfField(ru.CreateEmptyElement(), opts.Path)
 				if err != nil {
-					return err
+					return dst, err
 				}
 				if err := BrgModel.Find(fmt.Sprintf("%s $IN", rel.BrgSrcField), srcValues).All(allBrgSliceRef.Addr().Interface()); err != nil {
-					return err
+					return dst, err
 				}
 				// 3.建立映射
 				srcIdBrgMapRef := make(map[any]*reflect.Value)
@@ -947,10 +980,10 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 				}
 			}
 		default:
-			return fmt.Errorf("unknown relation: %s.%s[%s]", sch.Name, opts.Path, rel.Type)
+			return dst, fmt.Errorf("unknown relation: %s.%s[%s]", sch.Name, opts.Path, rel.Kind)
 		}
 	} else {
-		switch rel.Type {
+		switch rel.Kind {
 		case HasOne:
 			// TODO 待实现
 
@@ -963,9 +996,9 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) err
 		case ReferencesMany:
 			// TODO 待实现
 		default:
-			return fmt.Errorf("unknown relation: %s.%s[%s]", sch.Name, opts.Path, rel.Type)
+			return dst, fmt.Errorf("unknown relation: %s.%s[%s]", sch.Name, opts.Path, rel.Kind)
 		}
 	}
 
-	return nil
+	return dst, nil
 }
