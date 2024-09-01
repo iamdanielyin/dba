@@ -254,14 +254,18 @@ type Result struct {
 	populates []*PopulateOptions
 }
 
-func (r *Result) And(conditions ...any) *Result {
+func (r *Result) Where(conditions ...any) *Result {
+	return r.AddAnd(conditions...)
+}
+
+func (r *Result) AddAnd(conditions ...any) *Result {
 	if f := And(conditions...); f != nil {
 		r.filters = append(r.filters, f)
 	}
 	return r
 }
 
-func (r *Result) Or(conditions ...any) *Result {
+func (r *Result) AddOr(conditions ...any) *Result {
 	if f := Or(conditions...); f != nil {
 		r.filters = append(r.filters, f)
 	}
@@ -832,7 +836,7 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) (an
 		if err != nil {
 			return dst, err
 		}
-		if err := DstModel.Find(fmt.Sprintf("%s $IN", rel.DstField), srcValues).All(dstSliceRef.Addr().Interface()); err != nil {
+		if err := DstModel.Find(fmt.Sprintf("%s $IN", rel.DstField), srcValues).Where().All(dstSliceRef.Addr().Interface()); err != nil {
 			return dst, err
 		}
 		// 3.建立映射
