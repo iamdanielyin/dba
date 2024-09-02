@@ -43,7 +43,7 @@ func main() {
 
 	// query
 	var list []*examples.Permission
-	if err := Permission.Find().Select("ID", "Code").Or("ID >", 1, "Code $PREFIX", "2023").All(&list); err != nil {
+	if err := Permission.Find().Select("ID", "Code").AddOr("ID >", 1, "Code $PREFIX", "2023").All(&list); err != nil {
 		log.Fatal(err)
 	}
 
@@ -198,4 +198,26 @@ func main() {
 		user.Departments = userDeptsMap[user.ID]
 		users[i] = user
 	}
+
+	docs := []*examples.User{
+		{
+			Nickname: "测试1",
+			Profile: &examples.Profile{
+				RealName: "测试1-姓名",
+			},
+		},
+		{
+			Nickname: "测试2",
+			Profile: &examples.Profile{
+				RealName: "测试2-姓名",
+			},
+		},
+	}
+	User.Create(&docs, &dba.CreateOptions{
+		RelationWriteConfig: &dba.RelationWriteConfig{
+			AppendFields:  []string{"Profile"},
+			UpsertFields:  nil,
+			ReplaceFields: nil,
+		},
+	})
 }

@@ -90,11 +90,11 @@ func (m *mysqlDriver) CreateClauses() string {
 	//(value1c, value2c, value3c, ...)
 	//ON DUPLICATE KEY UPDATE column1 = VALUES(column1), column2 = VALUES(column2), ...;
 
-	return `INSERT {{if eq .ConflictType "IGNORE"}}IGNORE {{end}}INTO {{.Table}} ({{.Columns}})
+	return `INSERT {{if eq .ConflictKind "IGNORE"}}IGNORE {{end}}INTO {{.Table}} ({{.Columns}})
 			VALUES
 			{{.Rows}}
-			{{if .ConflictUpdateValues}}
-			ON DUPLICATE KEY UPDATE {{.ConflictUpdateValues}}
+			{{if .ConflictUpdates}}
+			ON DUPLICATE KEY UPDATE {{.ConflictUpdates}}
 			{{end}}`
 }
 

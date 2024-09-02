@@ -21,29 +21,32 @@ type DataModel struct {
 	queryTemplate  *template.Template
 }
 
-type ConflictType string
+type ConflictKind string
 
 const (
-	ConflictIgnore         ConflictType = "IGNORE"
-	ConflictUpdatePartial  ConflictType = "UPDATE_PARTIAL"
-	ConflictUpdateComputed ConflictType = "UPDATE_COMPUTED"
+	ConflictIgnore ConflictKind = "IGNORE"
+	ConflictUpdate ConflictKind = "UPDATE"
 )
 
 type RelationWriteMode string
 
-const (
-	RelationAppend  RelationWriteMode = "APPEND"
-	RelationUpsert  RelationWriteMode = "UPSERT"
-	RelationReplace RelationWriteMode = "REPLACE"
-)
-
 type CreateOptions struct {
-	BatchSize            int
-	SharedTx             bool           // 用于指定是否所有批次共用一个事务
-	ConflictType         ConflictType   // 指定冲突处理方式
-	UpdateColumns        []string       // 在部分更新情况下指定要更新的列
-	ComputedUpdateValues map[string]any // 在计算更新情况下指定更新的值
-	RelationWriteMode    RelationWriteMode
+	BatchSize           int
+	SharedTx            bool             // 用于指定是否所有批次共用一个事务
+	ConflictUpdates     *ConflictUpdates // 指定冲突处理方式
+	RelationWriteConfig *RelationWriteConfig
+}
+
+type ConflictUpdates struct {
+	Kind    ConflictKind
+	Columns map[string]any // 在部分更新情况下指定要更新的列（保留原值的话，value为nil即可）
+}
+
+type RelationWriteConfig struct {
+	ReplaceFields []string
+	AppendFields  []string
+	UpsertFields  []string
+	IgnoreFields  []string
 }
 
 func (dm *DataModel) Create(value any, options ...*CreateOptions) error {
@@ -175,29 +178,31 @@ func (dm *DataModel) insertBatchWithTx(tx *sqlx.Tx, columns []string, vars [][]a
 		"Rows":    strings.Join(placeholders, ", "),
 	}
 
-	if opts.ConflictType != "" {
-		data["ConflictType"] = opts.ConflictType
+	if opts.ConflictUpdates != nil {
+		if opts.ConflictUpdates.Kind == "" {
+			opts.ConflictUpdates.Kind = ConflictIgnore
+		}
+		data["ConflictKind"] = opts.ConflictUpdates.Kind
 
 		var (
 			conflictUpdateColumns []string
 			conflictUpdateValues  []any
 		)
-		switch opts.ConflictType {
+		switch opts.ConflictUpdates.Kind {
 		case ConflictIgnore:
-		case ConflictUpdatePartial:
-			for _, column := range opts.UpdateColumns {
-				conflictUpdateColumns = append(conflictUpdateColumns, fmt.Sprintf("%s = VALUES(%s)", column, column))
-			}
-		case ConflictUpdateComputed:
-			if len(opts.ComputedUpdateValues) > 0 {
-				for key, val := range opts.ComputedUpdateValues {
-					conflictUpdateColumns = append(conflictUpdateColumns, fmt.Sprintf("%s = ?", key))
-					conflictUpdateValues = append(conflictUpdateValues, val)
+		case ConflictUpdate:
+			for column, customValue := range opts.ConflictUpdates.Columns {
+				refVal := reflect.Indirect(reflect.ValueOf(customValue))
+				if refVal.IsNil() {
+					conflictUpdateColumns = append(conflictUpdateColumns, fmt.Sprintf("%s = VALUES(%s)", column, column))
+				} else {
+					conflictUpdateColumns = append(conflictUpdateColumns, fmt.Sprintf("%s = ?", column))
+					conflictUpdateValues = append(conflictUpdateValues, customValue)
 				}
 			}
 		}
 		if len(conflictUpdateColumns) > 0 {
-			data["ConflictUpdateValues"] = strings.Join(conflictUpdateColumns, ", ")
+			data["ConflictUpdates"] = strings.Join(conflictUpdateColumns, ", ")
 		}
 		if len(conflictUpdateValues) > 0 {
 			for i, items := range vars {
