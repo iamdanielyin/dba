@@ -138,6 +138,7 @@ func (dm *DataModel) Create(value any, options ...*CreateOptions) error {
 				insertID--
 			}
 		}
+		dm.afterCreate()
 	}
 
 	if opts.SharedTx {
@@ -161,7 +162,6 @@ func extractRowVars(ru *ReflectUtils, value any, columns []string, nativeFields 
 	return rowVars
 }
 
-// insertBatchWithTx 使用指定的事务插入一批数据
 func (dm *DataModel) insertBatchWithTx(tx *sqlx.Tx, columns []string, vars [][]any, opts *CreateOptions) (int64, error) {
 	placeholders := make([]string, len(vars))
 	for i := 0; i < len(placeholders); i++ {
@@ -230,6 +230,10 @@ func (dm *DataModel) insertBatchWithTx(tx *sqlx.Tx, columns []string, vars [][]a
 	}
 
 	return r.LastInsertId()
+}
+
+func (dm *DataModel) afterCreate() {
+
 }
 
 func (dm *DataModel) Find(conditions ...any) *Result {
