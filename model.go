@@ -43,10 +43,10 @@ type ConflictUpdates struct {
 }
 
 type RelationWriteConfig struct {
-	ReplaceFields []string
-	AppendFields  []string
-	UpsertFields  []string
-	IgnoreFields  []string
+	//ReplaceFields []string default
+	AppendFields []string
+	UpsertFields []string
+	IgnoreFields []string
 }
 
 func (dm *DataModel) Create(value any, options ...*CreateOptions) error {
