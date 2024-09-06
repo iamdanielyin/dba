@@ -469,6 +469,7 @@ func parseRelation(config string, currentSchema *Schema, currentField *Field, sc
 		kind = RelationKind(strings.ToUpper(config[:i]))
 		others = config[i+1:]
 	}
+	others = strings.TrimSpace(others)
 
 	rel := Relation{
 		Kind:      kind,
@@ -483,7 +484,7 @@ func parseRelation(config string, currentSchema *Schema, currentField *Field, sc
 		// HAS_ONE,ID->UserID
 		// HAS_MANY,ID->UserID
 		// REF_ONE,OrgID->ID
-		split := strings.Split(others, "->")
+		split := SplitAndTrimSpace(others, "->")
 		if len(split) != 2 {
 			return nil
 		}
@@ -495,9 +496,8 @@ func parseRelation(config string, currentSchema *Schema, currentField *Field, sc
 		fi := strings.Index(others, "(")
 		li := strings.LastIndex(others, ")")
 		rel.BrgSchema = others[:fi]
-		for i, item := range strings.Split(others[fi+1:li], ",") {
-			item = strings.TrimSpace(item)
-			split := strings.Split(item, "->")
+		for i, item := range SplitAndTrimSpace(others[fi+1:li], ",") {
+			split := SplitAndTrimSpace(item, "->")
 			if len(split) == 2 {
 				if i == 0 {
 					// src
@@ -528,11 +528,7 @@ func ParseTag(tagName string) map[string]string {
 
 	var result = make(map[string]string)
 
-	for _, item := range strings.Split(tagName, ";") {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
+	for _, item := range SplitAndTrimSpace(tagName, ";", true) {
 		var (
 			key   string
 			value string

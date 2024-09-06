@@ -31,22 +31,22 @@ const (
 type RelationWriteMode string
 
 type CreateOptions struct {
-	BatchSize           int
-	SharedTx            bool             // 用于指定是否所有批次共用一个事务
-	ConflictUpdates     *ConflictUpdates // 指定冲突处理方式
-	RelationWriteConfig *RelationWriteConfig
+	BatchSize       int
+	SharedTx        bool                   // 用于指定是否所有批次共用一个事务
+	ConflictUpdates *ConflictUpdateOptions // 指定冲突处理方式
+	RelatesWrites   *RelatesWriteOptions
 }
 
-type ConflictUpdates struct {
+type ConflictUpdateOptions struct {
 	Kind    ConflictKind
 	Columns map[string]any // 在部分更新情况下指定要更新的列（保留原值的话，value为nil即可）
 }
 
-type RelationWriteConfig struct {
-	//ReplaceFields []string default
-	AppendFields []string
-	UpsertFields []string
-	IgnoreFields []string
+type RelatesWriteOptions struct {
+	ReplaceFields []string // 无ID创建；有ID更新关系字段+其他字段（如有）；删除不在范围内的档案【默认策略】
+	UpsertFields  []string // 无ID创建；有ID更新关系字段+其他字段（如有）
+	AppendFields  []string // 无ID创建
+	IgnoreFields  []string // 无
 }
 
 func (dm *DataModel) Create(value any, options ...*CreateOptions) error {
@@ -1026,4 +1026,8 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) (an
 	}
 
 	return dst, nil
+}
+
+func relatesWrite(dst any, conn *Connection, sch *Schema, opts *RelatesWriteOptions) {
+
 }

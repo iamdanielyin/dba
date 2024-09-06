@@ -506,3 +506,25 @@ func parseStruct(value reflect.Value, result map[string]any) {
 		}
 	}
 }
+
+func SplitAndTrimSpace(s, sep string, removeEmpty ...bool) []string {
+	var re bool
+	if len(removeEmpty) > 0 {
+		re = removeEmpty[0]
+	}
+
+	var result []string
+	for _, item := range strings.Split(s, sep) {
+		item = strings.TrimSpace(item)
+		if (re && item != "") || !re {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func TrimSpaceSlice(s []string) {
+	for i, item := range s {
+		s[i] = strings.TrimSpace(item)
+	}
+}
