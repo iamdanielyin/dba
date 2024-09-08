@@ -63,20 +63,18 @@ func NewReflectUtils(a any) (*ReflectUtils, error) {
 			cat = CategoryMapStringAny
 		}
 	case reflect.Slice, reflect.Array:
+		ru.isArray = true
 		elemType := ru.indirectTyp.Elem()
 		switch elemType.Kind() {
 		case reflect.Struct:
 			cat = CategoryStructSliceOrArray
-			ru.isArray = true
 		case reflect.Ptr:
 			if elemType.Elem().Kind() == reflect.Struct {
 				cat = CategoryStructPointerSliceOrArray
-				ru.isArray = true
 			}
 		case reflect.Map:
 			if elemType.Key().Kind() == reflect.String && elemType.Elem().Kind() == reflect.Interface {
 				cat = CategoryMapStringAnyPointerSliceOrArray
-				ru.isArray = true
 			}
 		default:
 			cat = CategoryUnknown

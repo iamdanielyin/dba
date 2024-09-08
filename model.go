@@ -42,8 +42,26 @@ type ConflictUpdateOptions struct {
 	Columns map[string]any // 在部分更新情况下指定要更新的列（保留原值的话，value为nil即可）
 }
 
+// 关系更新逻辑设计
+//
+// 创建时/更新时
+// * HAS_ONE：根据关系字段查询--有档案修改，无档案新增
+// * HAS_MANY：根据关系字段查询
+//   1. 替换模式（默认）：无ID创建，有ID更新关系字段+其他字段（如有），删除不在范围内的档案
+//   2. 更新模式：无ID创建，有ID更新关系字段+其他字段（如有）
+//   3. 追加模式：无ID创建
+//   4. 忽略模式：无
+// * REF_ONE：更新关系字段（忽略引用档案传参）
+// * REF_MANY：更新中间表（忽略引用档案传参）
+//
+// 删除时
+// * HAS_ONE：删除档案（主+子）
+// * HAS_MANY：删除档案（主+子）
+// * REF_ONE：删除关系（置空当前表关系字段）
+// * REF_MANY：删除关系（清空中间表）
+
 type RelatesWriteOptions struct {
-	ReplaceFields []string // 无ID创建；有ID更新关系字段+其他字段（如有）；删除不在范围内的档案【默认策略】
+	ReplaceFields []string // 无ID创建；有ID更新关系字段+其他字段（如有）；删除不在范围内的档案（默认策略）
 	UpsertFields  []string // 无ID创建；有ID更新关系字段+其他字段（如有）
 	AppendFields  []string // 无ID创建
 	IgnoreFields  []string // 无
@@ -616,7 +634,7 @@ func (r *Result) afterQuery(dst any) error {
 				return err
 			}
 			if fru.Value().CanAddr() {
-				if res, err := populate(fru.IndirectVal().Addr().Interface(), r.dm.conn, sch, opts); err != nil {
+				if res, err := relatesQuery(fru.IndirectVal().Addr().Interface(), r.dm.conn, sch, opts); err != nil {
 					return err
 				} else {
 					if err := ru.SetFieldOrKey(ru.Raw(), opts.Path, res); err != nil {
@@ -624,7 +642,7 @@ func (r *Result) afterQuery(dst any) error {
 					}
 				}
 			} else {
-				if _, err := populate(docs, r.dm.conn, sch, opts); err != nil {
+				if _, err := relatesQuery(docs, r.dm.conn, sch, opts); err != nil {
 					return err
 				}
 
@@ -815,7 +833,7 @@ func autoScan(dst any, xdb *sqlx.DB, sql string, attrs []any) error {
 	return nil
 }
 
-func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) (any, error) {
+func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) (any, error) {
 	field := sch.Fields[opts.Path]
 	rel := field.Relation
 	if opts.CustomRel != nil {
@@ -825,18 +843,13 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) (an
 	if !field.Valid() || rel == nil {
 		return dst, fmt.Errorf("populate field failed: %s.%s", sch.Name, opts.Path)
 	}
-
+	dst = Item2List(dst)
 	ru, err := NewReflectUtils(dst)
 	if err != nil {
 		return dst, err
 	}
 
 	ns := conn.ns
-
-	if !ru.isArray {
-		// 单个转换为数组
-		ru, _ = NewReflectUtils(reflect.MakeSlice(ru.IndirectVal().Addr().Type(), 0, 0).Addr().Interface())
-	}
 
 	// 1.收集关联的ID
 	var srcValues []any
@@ -1028,6 +1041,26 @@ func populate(dst any, conn *Connection, sch *Schema, opts *PopulateOptions) (an
 	return dst, nil
 }
 
-func relatesWrite(dst any, conn *Connection, sch *Schema, opts *RelatesWriteOptions) {
+func relatesWriteOnCreate(inputValues any, conn *Connection, sch *Schema, opts *RelatesWriteOptions) error {
+	inputValues = Item2List(inputValues)
+	ru, err := NewReflectUtils(inputValues)
+	if err != nil {
+		return err
+	}
 
+	switch ru {
+
+	}
+}
+
+func relatesWriteOnUpdate(inputValues any, conn *Connection, sch *Schema, opts *RelatesWriteOptions) error {
+	inputValues = Item2List(inputValues)
+	ru, err := NewReflectUtils(inputValues)
+	if err != nil {
+		return err
+	}
+
+	switch ru {
+
+	}
 }

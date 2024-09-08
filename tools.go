@@ -528,3 +528,13 @@ func TrimSpaceSlice(s []string) {
 		s[i] = strings.TrimSpace(item)
 	}
 }
+
+func Item2List(dst any) any {
+	v := reflect.Indirect(reflect.ValueOf(dst))
+	if k := v.Kind(); k != reflect.Array && k != reflect.Slice {
+		s := reflect.MakeSlice(v.Addr().Type(), 0, 0)
+		s = reflect.Append(s, v.Addr())
+		return s.Addr().Interface()
+	}
+	return dst
+}
