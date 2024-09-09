@@ -1047,6 +1047,30 @@ func relatesWriteOnCreate(inputValues any, conn *Connection, sch *Schema, opts *
 	if err != nil {
 		return err
 	}
+	for i := 0; i < ru.GetLen(); i++ {
+		elem := ru.GetElement(i)
+		elemValues, err := ru.GetAllFieldsOrKeysAndValues(elem)
+		if err != nil {
+			continue
+		}
+		elemRU, err := NewReflectUtils(elem)
+		if err != nil {
+			continue
+		}
+		for k, v := range elemValues {
+			f := sch.Fields[k]
+			rel := f.Relation
+			if rel == nil {
+				continue
+			}
+			switch rel.Kind {
+			case HasOne:
+			case HasMany:
+			case ReferencesOne:
+			case ReferencesMany:
+			}
+		}
+	}
 
 	switch ru {
 
@@ -1054,13 +1078,5 @@ func relatesWriteOnCreate(inputValues any, conn *Connection, sch *Schema, opts *
 }
 
 func relatesWriteOnUpdate(inputValues any, conn *Connection, sch *Schema, opts *RelatesWriteOptions) error {
-	inputValues = Item2List(inputValues)
-	ru, err := NewReflectUtils(inputValues)
-	if err != nil {
-		return err
-	}
-
-	switch ru {
-
-	}
+	return nil
 }

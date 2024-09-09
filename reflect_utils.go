@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
-	"github.com/iamdanielyin/structs"
 	"github.com/jinzhu/now"
 	"go/ast"
 	"gorm.io/gorm/clause"
@@ -558,24 +557,13 @@ func (ru *ReflectUtils) SetFieldOrKey(elem any, k string, v any) (err error) {
 
 // GetAllFieldNamesOrKeys 获取所有字段名或键名
 func (ru *ReflectUtils) GetAllFieldNamesOrKeys(elem any) ([]string, error) {
-	val := reflect.ValueOf(elem)
+	pairs, err := ru.GetAllFieldsOrKeysAndValues(elem)
+	if err != nil {
+		return nil, err
+	}
 	var names []string
-
-	switch val.Kind() {
-	case reflect.Struct:
-		for i := 0; i < val.NumField(); i++ {
-			names = append(names, val.Type().Field(i).Name)
-		}
-	case reflect.Ptr:
-		if val.Elem().Kind() == reflect.Struct {
-			return ru.GetAllFieldNamesOrKeys(val.Elem().Interface())
-		}
-	case reflect.Map:
-		for _, key := range val.MapKeys() {
-			names = append(names, fmt.Sprintf("%v", key.Interface()))
-		}
-	default:
-		return nil, fmt.Errorf("不支持的类型")
+	for k, _ := range pairs {
+		names = append(names, k)
 	}
 
 	return names, nil
@@ -583,24 +571,13 @@ func (ru *ReflectUtils) GetAllFieldNamesOrKeys(elem any) ([]string, error) {
 
 // GetAllFieldValuesOrValues 获取所有字段值或键值
 func (ru *ReflectUtils) GetAllFieldValuesOrValues(elem any) ([]any, error) {
-	val := reflect.ValueOf(elem)
+	pairs, err := ru.GetAllFieldsOrKeysAndValues(elem)
+	if err != nil {
+		return nil, err
+	}
 	var values []any
-
-	switch val.Kind() {
-	case reflect.Struct:
-		for i := 0; i < val.NumField(); i++ {
-			values = append(values, val.Field(i).Interface())
-		}
-	case reflect.Ptr:
-		if val.Elem().Kind() == reflect.Struct {
-			return ru.GetAllFieldValuesOrValues(val.Elem().Interface())
-		}
-	case reflect.Map:
-		for _, key := range val.MapKeys() {
-			values = append(values, val.MapIndex(key).Interface())
-		}
-	default:
-		return nil, fmt.Errorf("不支持的类型")
+	for _, v := range pairs {
+		values = append(values, v)
 	}
 
 	return values, nil
@@ -608,23 +585,51 @@ func (ru *ReflectUtils) GetAllFieldValuesOrValues(elem any) ([]any, error) {
 
 // GetAllFieldsOrKeysAndValues 获取所有字段名或键名及其对应的值
 func (ru *ReflectUtils) GetAllFieldsOrKeysAndValues(elem any) (map[string]any, error) {
-	val := reflect.ValueOf(elem)
+	val := reflect.Indirect(reflect.ValueOf(elem))
 	result := make(map[string]any)
 
 	switch val.Kind() {
 	case reflect.Struct:
-		for _, f := range structs.New(elem).Fields() {
-			if f.IsExported() && !f.IsZero() {
-				result[f.Name()] = f.Value()
+		modelType := val.Type()
+		for i := 0; i < modelType.NumField(); i++ {
+			fieldStruct := modelType.Field(i)
+			if !ast.IsExported(fieldStruct.Name) {
+				continue
 			}
-		}
-	case reflect.Ptr:
-		if val.Elem().Kind() == reflect.Struct {
-			return ru.GetAllFieldsOrKeysAndValues(val.Elem().Interface())
+
+			fieldIndex := fieldStruct.Index[0]
+			if len(fieldStruct.Index) == 1 && fieldIndex > 0 {
+				fieldValue := val.Field(fieldIndex)
+				if !fieldValue.IsZero() {
+					result[fieldStruct.Name] = fieldValue.Interface()
+				}
+			} else {
+				v := val
+				for _, fieldIdx := range fieldStruct.Index {
+					if fieldIdx >= 0 {
+						v = v.Field(fieldIdx)
+					} else {
+						v = v.Field(-fieldIdx - 1)
+
+						if !v.IsNil() {
+							v = v.Elem()
+						} else {
+							break
+						}
+					}
+				}
+				if !v.IsNil() && !v.IsZero() {
+					result[fieldStruct.Name] = v.Interface()
+				}
+			}
 		}
 	case reflect.Map:
 		for _, key := range val.MapKeys() {
-			result[fmt.Sprintf("%v", key.Interface())] = val.MapIndex(key).Interface()
+			val := val.MapIndex(key)
+			if val.IsNil() || val.IsZero() {
+				continue
+			}
+			result[fmt.Sprintf("%v", key.Interface())] = val.Interface()
 		}
 	default:
 		return nil, fmt.Errorf("不支持的类型")
