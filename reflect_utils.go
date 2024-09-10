@@ -184,49 +184,16 @@ func getStructField(v reflect.Value, fieldName string) (reflect.StructField, err
 // 如果字段或键不存在，或类型不支持，返回错误。
 func (ru *ReflectUtils) GetFieldOrKey(elem any, k string) (result any, isEmpty bool) {
 	isEmpty = true
-
-	value := reflect.ValueOf(elem)
-
-	switch value.Kind() {
-	case reflect.Struct, reflect.Ptr:
-		// 获取目标字段的 reflect.Value
-		structField, err := getStructField(value, k)
-		if err != nil {
-			return
-		}
-		fieldIndex := structField.Index[0]
-		if len(structField.Index) == 1 && fieldIndex > 0 {
-			fieldValue := reflect.Indirect(value).Field(fieldIndex)
-			result, isEmpty = fieldValue.Interface(), fieldValue.IsZero()
-		} else {
-			v := reflect.Indirect(value)
-			for _, fieldIdx := range structField.Index {
-				if fieldIdx >= 0 {
-					v = v.Field(fieldIdx)
-				} else {
-					v = v.Field(-fieldIdx - 1)
-
-					if !v.IsNil() {
-						v = v.Elem()
-					} else {
-						return nil, isEmpty
-					}
-				}
-			}
-
-			result, isEmpty = v.Interface(), v.IsZero()
-		}
-	case reflect.Map:
-		// 处理 map 类型，通过键名获取对应的值
-		keyVal := value.MapIndex(reflect.ValueOf(k))
-		if !keyVal.IsValid() {
-			return
-		}
-		result, isEmpty = keyVal.Interface(), keyVal.IsZero()
-	default:
+	elemVal := reflect.ValueOf(elem)
+	fieldVal := getStructFieldValue(&elemVal, k)
+	if fieldVal == nil {
+		return nil, true
 	}
-
-	return
+	if !fieldVal.IsNil() && !fieldVal.IsZero() {
+		return fieldVal.Interface(), false
+	} else {
+		return fieldVal.Interface(), true
+	}
 }
 
 // SetFieldOrKey 设置指定结构体字段或 map 键的值。
@@ -583,6 +550,58 @@ func (ru *ReflectUtils) GetAllFieldValuesOrValues(elem any) ([]any, error) {
 	return values, nil
 }
 
+func getStructFieldValue(structVal *reflect.Value, fieldName string) *reflect.Value {
+	val := reflect.Indirect(*structVal)
+	switch val.Kind() {
+	case reflect.Struct:
+		modelType := val.Type()
+		for i := 0; i < modelType.NumField(); i++ {
+			fieldStruct := modelType.Field(i)
+			if !ast.IsExported(fieldStruct.Name) || fieldStruct.Name != fieldName {
+				continue
+			}
+
+			fieldIndex := fieldStruct.Index[0]
+			if len(fieldStruct.Index) == 1 && fieldIndex > 0 {
+				fieldValue := val.Field(fieldIndex)
+				return &fieldValue
+			} else {
+				v := val
+				for _, fieldIdx := range fieldStruct.Index {
+					if fieldIdx >= 0 {
+						v = v.Field(fieldIdx)
+					} else {
+						v = v.Field(-fieldIdx - 1)
+
+						if !v.IsNil() {
+							v = v.Elem()
+						} else {
+							break
+						}
+					}
+				}
+				return &v
+			}
+		}
+	case reflect.Map:
+		for _, key := range val.MapKeys() {
+			key = reflect.Indirect(key)
+			switch key.Kind() {
+			case reflect.String:
+				if key.Interface().(string) == fieldName {
+					fieldVal := val.MapIndex(key)
+					return &fieldVal
+				}
+			default:
+				continue
+			}
+		}
+	default:
+		return nil
+	}
+	return nil
+}
+
 // GetAllFieldsOrKeysAndValues 获取所有字段名或键名及其对应的值
 func (ru *ReflectUtils) GetAllFieldsOrKeysAndValues(elem any) (map[string]any, error) {
 	val := reflect.Indirect(reflect.ValueOf(elem))
@@ -600,7 +619,7 @@ func (ru *ReflectUtils) GetAllFieldsOrKeysAndValues(elem any) (map[string]any, e
 			fieldIndex := fieldStruct.Index[0]
 			if len(fieldStruct.Index) == 1 && fieldIndex > 0 {
 				fieldValue := val.Field(fieldIndex)
-				if !fieldValue.IsZero() {
+				if !fieldValue.IsNil() && !fieldValue.IsZero() {
 					result[fieldStruct.Name] = fieldValue.Interface()
 				}
 			} else {
@@ -626,13 +645,11 @@ func (ru *ReflectUtils) GetAllFieldsOrKeysAndValues(elem any) (map[string]any, e
 	case reflect.Map:
 		for _, key := range val.MapKeys() {
 			val := val.MapIndex(key)
-			if val.IsNil() || val.IsZero() {
-				continue
+			if !val.IsNil() && !val.IsZero() {
+				result[fmt.Sprintf("%v", key.Interface())] = val.Interface()
 			}
-			result[fmt.Sprintf("%v", key.Interface())] = val.Interface()
 		}
 	default:
-		return nil, fmt.Errorf("不支持的类型")
 	}
 
 	return result, nil
