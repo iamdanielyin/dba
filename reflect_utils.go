@@ -182,10 +182,27 @@ func getStructField(v reflect.Value, fieldName string) (reflect.StructField, err
 // 如果是结构体，将尝试获取字段的 reflect.Value 并返回其 Interface()。
 // 如果是 map，将尝试获取指定键的值。
 // 如果字段或键不存在，或类型不支持，返回错误。
-func (ru *ReflectUtils) GetFieldOrKey(elem any, k string) (result any, isEmpty bool) {
+func (ru *ReflectUtils) GetElemFieldOrKey(elem any, k string) (result any, isEmpty bool) {
 	isEmpty = true
 	elemVal := reflect.ValueOf(elem)
-	fieldVal := getStructFieldValue(&elemVal, k)
+	fieldVal := getStructFieldOrMapValue(&elemVal, k)
+	if fieldVal == nil {
+		return nil, true
+	}
+	if !fieldVal.IsNil() && !fieldVal.IsZero() {
+		return fieldVal.Interface(), false
+	} else {
+		return fieldVal.Interface(), true
+	}
+}
+
+// GetFieldOrKey 获取指定结构体字段或 map 键的值。
+// 如果是结构体，将尝试获取字段的 reflect.Value 并返回其 Interface()。
+// 如果是 map，将尝试获取指定键的值。
+// 如果字段或键不存在，或类型不支持，返回错误。
+func (ru *ReflectUtils) GetFieldOrKey(k string) (result any, isEmpty bool) {
+	isEmpty = true
+	fieldVal := getStructFieldOrMapValue(&ru.indirectVal, k)
 	if fieldVal == nil {
 		return nil, true
 	}
@@ -550,7 +567,7 @@ func (ru *ReflectUtils) GetAllFieldValuesOrValues(elem any) ([]any, error) {
 	return values, nil
 }
 
-func getStructFieldValue(structVal *reflect.Value, fieldName string) *reflect.Value {
+func getStructFieldOrMapValue(structVal *reflect.Value, fieldName string) *reflect.Value {
 	val := reflect.Indirect(*structVal)
 	switch val.Kind() {
 	case reflect.Struct:

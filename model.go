@@ -855,7 +855,7 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 	var srcValues []any
 	for i := 0; i < ru.GetLen(); i++ {
 		elem := ru.GetElement(i)
-		val, isEmpty := ru.GetFieldOrKey(elem, rel.SrcField)
+		val, isEmpty := ru.GetElemFieldOrKey(elem, rel.SrcField)
 		if !isEmpty {
 			continue
 		}
@@ -879,7 +879,7 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 			if err != nil {
 				continue
 			}
-			dstId, isEmpty := re.GetFieldOrKey(re.Raw(), rel.DstField)
+			dstId, isEmpty := re.GetFieldOrKey(rel.DstField)
 			if isEmpty {
 				continue
 			}
@@ -889,7 +889,7 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 		// 4.回写字段
 		for i := 0; i < ru.GetLen(); i++ {
 			elem := ru.GetElement(i)
-			val, isEmpty := ru.GetFieldOrKey(elem, rel.SrcField)
+			val, isEmpty := ru.GetFieldOrKey(rel.SrcField)
 			if !isEmpty {
 				continue
 			}
@@ -914,7 +914,7 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 			if err != nil {
 				continue
 			}
-			dstId, isEmpty := re.GetFieldOrKey(re.Raw(), rel.DstField)
+			dstId, isEmpty := re.GetFieldOrKey(rel.DstField)
 			if isEmpty {
 				continue
 			}
@@ -928,7 +928,7 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 		// 4.回写字段
 		for i := 0; i < ru.GetLen(); i++ {
 			elem := ru.GetElement(i)
-			val, isEmpty := ru.GetFieldOrKey(elem, rel.SrcField)
+			val, isEmpty := ru.GetElemFieldOrKey(elem, rel.SrcField)
 			if !isEmpty {
 				continue
 			}
@@ -962,7 +962,7 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 				if err != nil {
 					continue
 				}
-				dstId, isEmpty := re.GetFieldOrKey(re.Raw(), rel.DstField)
+				dstId, isEmpty := re.GetFieldOrKey(rel.DstField)
 				if isEmpty {
 					continue
 				}
@@ -989,7 +989,7 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 			// 4.回写字段
 			for i := 0; i < ru.GetLen(); i++ {
 				elem := ru.GetElement(i)
-				srcId, isEmpty := ru.GetFieldOrKey(elem, rel.SrcField)
+				srcId, isEmpty := ru.GetElemFieldOrKey(elem, rel.SrcField)
 				if !isEmpty {
 					continue
 				}
@@ -1012,7 +1012,7 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 				if err != nil {
 					continue
 				}
-				brgSrcId, isEmpty := re.GetFieldOrKey(re.Raw(), rel.BrgSrcField)
+				brgSrcId, isEmpty := re.GetFieldOrKey(rel.BrgSrcField)
 				if isEmpty {
 					continue
 				}
@@ -1027,7 +1027,7 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 			// 4.回写字段
 			for i := 0; i < ru.GetLen(); i++ {
 				elem := ru.GetElement(i)
-				srcId, isEmpty := ru.GetFieldOrKey(elem, rel.SrcField)
+				srcId, isEmpty := ru.GetElemFieldOrKey(elem, rel.SrcField)
 				if !isEmpty {
 					continue
 				}
@@ -1047,13 +1047,14 @@ func relatesWriteOnCreate(inputValues any, conn *Connection, sch *Schema, opts *
 	if err != nil {
 		return err
 	}
+	ns := conn.ns
 	for i := 0; i < ru.GetLen(); i++ {
 		elem := ru.GetElement(i)
 		elemValues, err := ru.GetAllFieldsOrKeysAndValues(elem)
 		if err != nil {
 			continue
 		}
-		elemRU, err := NewReflectUtils(elem)
+		rue, err := NewReflectUtils(elem)
 		if err != nil {
 			continue
 		}
@@ -1065,6 +1066,17 @@ func relatesWriteOnCreate(inputValues any, conn *Connection, sch *Schema, opts *
 			}
 			switch rel.Kind {
 			case HasOne:
+				srcVal, has := elemValues[rel.SrcField]
+				if !has {
+					continue
+				}
+				DstModel := ns.ModelBy(conn.name, rel.DstSchema)
+				dst := NewReflectValue(v)
+				if err := DstModel.Find(fmt.Sprintf("%s", rel.DstField), srcVal).One(dst.Addr().Interface()); err != nil {
+					return err
+				}
+				dst.FieldByName()
+
 			case HasMany:
 			case ReferencesOne:
 			case ReferencesMany:

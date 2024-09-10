@@ -37,6 +37,9 @@ func (c *Connection) Init(schs ...map[string]*Schema) error {
 	}
 	return nil
 }
+func (c *Connection) Namespace() *Namespace {
+	return c.ns
+}
 
 func (c *Connection) GenDDL(schs map[string]*Schema, ignoreComments ...bool) string {
 	var sortedNames []string
