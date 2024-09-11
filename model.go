@@ -1064,13 +1064,26 @@ func relatesWriteOnCreate(input any, conn *Connection, sch *Schema, opts *Relate
 				if !has {
 					continue
 				}
+				dstSch := ns.SchemaBy(rel.DstSchema)
+				if dstSch == nil {
+					continue
+				}
 				DstModel := ns.ModelBy(conn.name, rel.DstSchema)
 				dst := NewVar(value)
 				if err := DstModel.Find(fmt.Sprintf("%s", rel.DstField), srcVal).One(dst.Addr().Interface()); err != nil {
 					return err
 				}
-				//TODO
-
+				storedValue := NewReflectValue(dst.Addr().Interface()).Map()
+				if id, ok := storedValue[dstSch.PrimaryField().Name]; ok && id != nil {
+					// update
+					changedValues := NewReflectValue(value).Map()
+					delete(changedValues, dstSch.PrimaryField().Name)
+					_, err := DstModel.Find(fmt.Sprintf("%s", dstSch.PrimaryField().Name), id).Update(changedValues)
+					return err
+				} else {
+					// create
+					return DstModel.Create(value)
+				}
 			case HasMany:
 			case ReferencesOne:
 			case ReferencesMany:
