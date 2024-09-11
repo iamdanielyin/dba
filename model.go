@@ -61,10 +61,10 @@ type ConflictUpdateOptions struct {
 // * REF_MANY：删除关系（清空中间表）
 
 type RelatesWriteOptions struct {
-	ReplaceFields []string // 无ID创建；有ID更新关系字段+其他字段（如有）；删除不在范围内的档案（默认策略）
-	UpsertFields  []string // 无ID创建；有ID更新关系字段+其他字段（如有）
-	AppendFields  []string // 无ID创建
-	IgnoreFields  []string // 无
+	IgnoreFields  []string // 无 1
+	AppendFields  []string // 无ID创建 2
+	UpsertFields  []string // 无ID创建；有ID更新关系字段+其他字段（如有） 3
+	ReplaceFields []string // 无ID创建；有ID更新关系字段+其他字段（如有）；删除不在范围内的档案（默认策略） 4
 }
 
 func (dm *DataModel) Create(value any, options ...*CreateOptions) error {
@@ -1044,6 +1044,47 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 func relatesWriteOnCreate(input any, conn *Connection, sch *Schema, opts *RelatesWriteOptions) error {
 	input = Item2List(input)
 	docs := NewReflectValue(input)
+
+	fieldStrategy := make(map[string]int)
+	if opts != nil {
+		for _, item := range opts.IgnoreFields {
+			if item == "" || fieldStrategy[item] > 0 {
+				continue
+			}
+			fieldStrategy[item] = 1
+		}
+		for _, item := range opts.ReplaceFields {
+			if item == "" || fieldStrategy[item] > 0 {
+				continue
+			}
+			fieldStrategy[item] = 2
+		}
+		for _, item := range opts.UpsertFields {
+			if item == "" || fieldStrategy[item] > 0 {
+				continue
+			}
+			fieldStrategy[item] = 3
+		}
+		for _, item := range opts.AppendFields {
+			if item == "" || fieldStrategy[item] > 0 {
+				continue
+			}
+			fieldStrategy[item] = 4
+		}
+		if len(opts.ReplaceFields) == 0 {
+			// 设置默认策略
+			for _, f := range sch.Fields {
+				if !f.Valid() || f.Relation == nil {
+					continue
+				}
+				if fieldStrategy[f.Name] != 0 {
+					continue
+				}
+				fieldStrategy[f.Name] = 4
+			}
+		}
+	}
+
 	ns := conn.ns
 	for i := 0; i < docs.Len(); i++ {
 		item := NewReflectValue(docs.Index(i))
@@ -1051,48 +1092,58 @@ func relatesWriteOnCreate(input any, conn *Connection, sch *Schema, opts *Relate
 		if len(docValues) == 0 {
 			continue
 		}
-		for name, value := range docValues {
-			field := sch.Fields[name]
-			if field.Relation == nil {
+		for k, v := range docValues {
+			field := sch.Fields[k]
+			if !field.Valid() || field.Relation == nil || fieldStrategy[k] == 1 {
 				continue
 			}
 
 			rel := field.Relation
+			srcVal, has := docValues[rel.SrcField]
+			if !has {
+				continue
+			}
+			dstSch := ns.SchemaBy(rel.DstSchema)
+			if dstSch == nil {
+				continue
+			}
+			value := NewReflectValue(v)
+			DstModel := ns.ModelBy(conn.name, rel.DstSchema)
+			dst := NewVar(v)
 			switch rel.Kind {
 			case HasOne:
-				srcVal, has := docValues[rel.SrcField]
-				if !has {
-					continue
-				}
-				dstSch := ns.SchemaBy(rel.DstSchema)
-				if dstSch == nil {
-					continue
-				}
-				DstModel := ns.ModelBy(conn.name, rel.DstSchema)
-				dst := NewVar(value)
 				if err := DstModel.Find(fmt.Sprintf("%s", rel.DstField), srcVal).One(dst.Addr().Interface()); err != nil {
 					return err
 				}
 				storedValue := NewReflectValue(dst.Addr().Interface()).Map()
+				changedValues := value.Map()
+				changedValues[rel.DstField] = srcVal
 				if id, ok := storedValue[dstSch.PrimaryField().Name]; ok && id != nil {
+					if fieldStrategy[k] < 3 {
+						continue
+					}
 					// update
-					changedValues := NewReflectValue(value).Map()
 					delete(changedValues, dstSch.PrimaryField().Name)
 					_, err := DstModel.Find(fmt.Sprintf("%s", dstSch.PrimaryField().Name), id).Update(changedValues)
 					return err
 				} else {
 					// create
-					return DstModel.Create(value)
+					return DstModel.Create(v)
 				}
 			case HasMany:
+				if err := DstModel.Find(fmt.Sprintf("%s", rel.DstField), srcVal).All(dst.Addr().Interface()); err != nil {
+					return err
+				}
+				// TODO
+				//input 无id -- create item
+				//input 有id -- update item
+				//store id不在input中 -- delete item
+				//reflect.DeepEqual比较两个ID是否相等
+
 			case ReferencesOne:
 			case ReferencesMany:
 			}
 		}
-	}
-
-	switch ru {
-
 	}
 }
 
