@@ -1041,41 +1041,35 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 	return dst, nil
 }
 
-func relatesWriteOnCreate(inputValues any, conn *Connection, sch *Schema, opts *RelatesWriteOptions) error {
-	inputValues = Item2List(inputValues)
-	ru, err := NewReflectUtils(inputValues)
-	if err != nil {
-		return err
-	}
+func relatesWriteOnCreate(input any, conn *Connection, sch *Schema, opts *RelatesWriteOptions) error {
+	input = Item2List(input)
+	docs := NewReflectValue(input)
 	ns := conn.ns
-	for i := 0; i < ru.GetLen(); i++ {
-		elem := ru.GetElement(i)
-		elemValues, err := ru.GetAllFieldsOrKeysAndValues(elem)
-		if err != nil {
+	for i := 0; i < docs.Len(); i++ {
+		item := NewReflectValue(docs.Index(i))
+		docValues := item.Map()
+		if len(docValues) == 0 {
 			continue
 		}
-		rue, err := NewReflectUtils(elem)
-		if err != nil {
-			continue
-		}
-		for k, v := range elemValues {
-			f := sch.Fields[k]
-			rel := f.Relation
-			if rel == nil {
+		for name, value := range docValues {
+			field := sch.Fields[name]
+			if field.Relation == nil {
 				continue
 			}
+
+			rel := field.Relation
 			switch rel.Kind {
 			case HasOne:
-				srcVal, has := elemValues[rel.SrcField]
+				srcVal, has := docValues[rel.SrcField]
 				if !has {
 					continue
 				}
 				DstModel := ns.ModelBy(conn.name, rel.DstSchema)
-				dst := NewReflectValue(v)
+				dst := NewVar(value)
 				if err := DstModel.Find(fmt.Sprintf("%s", rel.DstField), srcVal).One(dst.Addr().Interface()); err != nil {
 					return err
 				}
-				dst.FieldByName()
+				//TODO
 
 			case HasMany:
 			case ReferencesOne:

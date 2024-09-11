@@ -1,6 +1,7 @@
 package dba
 
 import (
+	"fmt"
 	"reflect"
 )
 
@@ -17,6 +18,10 @@ func NewReflectValue(src any) *ReflectValue {
 		raw:   raw,
 		Value: reflect.Indirect(raw),
 	}
+}
+func NewVar(src any) reflect.Value {
+	val := reflect.Indirect(reflect.ValueOf(src))
+	return reflect.New(val.Type())
 }
 
 func (rv *ReflectValue) Src() any {
@@ -72,7 +77,47 @@ func (rv *ReflectValue) FieldByName(fieldName string) *reflect.Value {
 	return nil
 }
 
-func StructToMap(input interface{}) map[string]any {
+func (rv *ReflectValue) Keys() []string {
+	entries := rv.Map()
+	var keys []string
+	if len(entries) > 0 {
+		for k, _ := range entries {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
+func (rv *ReflectValue) Values() []any {
+	entries := rv.Map()
+	var values []any
+	if len(entries) > 0 {
+		for _, v := range entries {
+			values = append(values, v)
+		}
+	}
+	return values
+}
+
+func (rv *ReflectValue) Map() map[string]any {
+	entries := make(map[string]any)
+
+	switch rv.Value.Kind() {
+	case reflect.Struct:
+		parseStructToMap(rv.Value, entries)
+	case reflect.Map:
+		for _, k := range rv.Value.MapKeys() {
+			v := rv.Value.MapIndex(k)
+			entries[fmt.Sprintf("%v", k)] = v
+		}
+	default:
+		return nil
+	}
+
+	return entries
+}
+
+func StructToMap(input any) map[string]any {
 	result := make(map[string]any)
 	v := reflect.ValueOf(input)
 
@@ -127,7 +172,7 @@ func parseStructToMap(v reflect.Value, result map[string]any) {
 	}
 }
 
-func getFieldValueByName(obj any, fieldName string) any {
+func StructFieldByName(obj any, fieldName string) any {
 	if obj == nil {
 		return nil
 	}
