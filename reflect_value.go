@@ -12,13 +12,22 @@ type ReflectValue struct {
 }
 
 func NewReflectValue(src any) *ReflectValue {
-	raw := reflect.ValueOf(src)
+	var raw reflect.Value
+	switch v := src.(type) {
+	case reflect.Value:
+		raw = v
+	case *reflect.Value:
+		raw = *v
+	default:
+		raw = reflect.ValueOf(v)
+	}
 	return &ReflectValue{
 		src:   src,
 		raw:   raw,
 		Value: reflect.Indirect(raw),
 	}
 }
+
 func NewVar(src any) reflect.Value {
 	val := reflect.Indirect(reflect.ValueOf(src))
 	return reflect.New(val.Type())

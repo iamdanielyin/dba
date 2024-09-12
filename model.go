@@ -47,7 +47,7 @@ type ConflictUpdateOptions struct {
 // 创建时/更新时
 // * HAS_ONE：根据关系字段查询--有档案修改，无档案新增
 // * HAS_MANY：根据关系字段查询
-//   1. 替换模式（默认）：无ID创建，有ID更新关系字段+其他字段（如有），删除不在范围内的档案
+//   1. 替换模式：无ID创建，有ID更新关系字段+其他字段（如有），删除不在范围内的档案（默认策略）
 //   2. 更新模式：无ID创建，有ID更新关系字段+其他字段（如有）
 //   3. 追加模式：无ID创建
 //   4. 忽略模式：无
@@ -174,7 +174,7 @@ func extractRowVars(ru *ReflectUtils, value any, columns []string, nativeFields 
 	var rowVars []any
 	for _, column := range columns {
 		field := nativeFields[column]
-		v, _ := ru.GetFieldOrKey(value, field.Name)
+		v, _ := ru.GetElemFieldOrKey(value, field.Name)
 		rowVars = append(rowVars, v)
 	}
 	return rowVars
@@ -609,7 +609,7 @@ func (r *Result) afterQuery(dst any) error {
 				return err
 			}
 			if i != 0 {
-				res, isEmpty := ru.GetFieldOrKey(ru.Raw(), opts.Path)
+				res, isEmpty := ru.GetFieldOrKey(opts.Path)
 				if isEmpty {
 					continue
 				}
@@ -1115,36 +1115,82 @@ func relatesWriteOnCreate(input any, conn *Connection, sch *Schema, opts *Relate
 				if err := DstModel.Find(fmt.Sprintf("%s", rel.DstField), srcVal).One(dst.Addr().Interface()); err != nil {
 					return err
 				}
-				storedValue := NewReflectValue(dst.Addr().Interface()).Map()
+				storedValue := NewReflectValue(dst).Map()
 				changedValues := value.Map()
 				changedValues[rel.DstField] = srcVal
 				if id, ok := storedValue[dstSch.PrimaryField().Name]; ok && id != nil {
-					if fieldStrategy[k] < 3 {
-						continue
+					if fieldStrategy[k] >= 3 {
+						// update
+						delete(changedValues, dstSch.PrimaryField().Name)
+						if _, err := DstModel.Find(fmt.Sprintf("%s", dstSch.PrimaryField().Name), id).Update(changedValues); err != nil {
+							return err
+						}
 					}
-					// update
-					delete(changedValues, dstSch.PrimaryField().Name)
-					_, err := DstModel.Find(fmt.Sprintf("%s", dstSch.PrimaryField().Name), id).Update(changedValues)
-					return err
 				} else {
 					// create
-					return DstModel.Create(v)
+					if err := DstModel.Create(v); err != nil {
+						return err
+					}
 				}
 			case HasMany:
 				if err := DstModel.Find(fmt.Sprintf("%s", rel.DstField), srcVal).All(dst.Addr().Interface()); err != nil {
 					return err
 				}
-				// TODO
-				//input 无id -- create item
-				//input 有id -- update item
-				//store id不在input中 -- delete item
-				//reflect.DeepEqual比较两个ID是否相等
 
+				var createDocs []any
+				var updateDocs = make(map[any]*ReflectValue)
+				var deleteDocIDs []any
+
+				doneInputIndex := make(map[int]bool)
+				for j := 0; j < dst.Len(); j++ {
+					storeDoc := NewReflectValue(dst.Index(j))
+					storeID := storeDoc.FieldByName(dstSch.PrimaryField().Name)
+					for k := 0; k < value.Len(); k++ {
+						if doneInputIndex[k] {
+							continue
+						}
+						inputDoc := NewReflectValue(value.Index(k))
+						inputID := inputDoc.FieldByName(dstSch.PrimaryField().Name)
+						if inputID.IsZero() {
+							createDocs = append(createDocs, inputDoc.Interface())
+						} else if reflect.DeepEqual(storeID.Interface(), inputID.Interface()) {
+							if !storeID.IsZero() {
+								updateDocs[storeID.Interface()] = inputDoc
+							}
+						} else {
+							deleteDocIDs = append(deleteDocIDs, storeID.Interface())
+						}
+						doneInputIndex[k] = true
+					}
+				}
+				//input 无id -- create item
+				if fieldStrategy[k] >= 2 {
+					if err := DstModel.Create(createDocs); err != nil {
+						return err
+					}
+				}
+				//input 有id -- update item
+				if fieldStrategy[k] >= 3 {
+					for id, item := range updateDocs {
+						if _, err := DstModel.Find(fmt.Sprintf("%s", dstSch.PrimaryField().Name), id).Update(item.Interface()); err != nil {
+							return err
+						}
+					}
+				}
+				//store id不在input中 -- delete item
+				if fieldStrategy[k] >= 4 {
+					if len(deleteDocIDs) > 0 {
+						if _, err := DstModel.Find(fmt.Sprintf("%s $IN", dstSch.PrimaryField().Name), deleteDocIDs).Delete(); err != nil {
+							return err
+						}
+					}
+				}
 			case ReferencesOne:
 			case ReferencesMany:
 			}
 		}
 	}
+	return nil
 }
 
 func relatesWriteOnUpdate(inputValues any, conn *Connection, sch *Schema, opts *RelatesWriteOptions) error {
