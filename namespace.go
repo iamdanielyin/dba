@@ -3,6 +3,7 @@ package dba
 import (
 	"fmt"
 	"github.com/Masterminds/sprig/v3"
+	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 	"sync"
 	"text/template"
@@ -174,8 +175,9 @@ func (ns *Namespace) setRelations() {
 	}
 }
 
-func (ns *Namespace) Model(schemaName string) *DataModel {
-	return ns.ModelBy("", schemaName)
+type ModelOptions struct {
+	ConnectionName string
+	Tx             *sqlx.Tx
 }
 
 func (ns *Namespace) Init(connectionName ...string) error {
@@ -193,10 +195,18 @@ func (ns *Namespace) Init(connectionName ...string) error {
 	return nil
 }
 
-func (ns *Namespace) ModelBy(connectionName, schemaName string) *DataModel {
+func (ns *Namespace) Model(schemaName string, options ...*ModelOptions) *DataModel {
+	opts := new(ModelOptions)
+	if len(options) > 0 && options[0] != nil {
+		opts = options[0]
+	}
+	connectionName := opts.ConnectionName
 	conn := ns.Session(connectionName)
 	if conn == nil {
 		panic(fmt.Errorf("connection not exists: %s", connectionName))
+	}
+	if opts.Tx == nil {
+		opts.Tx = conn.xdb
 	}
 
 	s := ns.SchemaBy(schemaName)
