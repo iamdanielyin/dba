@@ -22,7 +22,7 @@ type User struct {
 	TenantID       uint         `dba:"title=所属租户ID"`
 	Tenant         *Tenant      `dba:"title=所属租户;rel=REF_ONE,TenantID->ID"`
 	Tags           []*Tag       `dba:"title=已有标签;rel=REF_MANY,user_tag_refers(id->User_id,id->tag_id)"` // 直接对表
-	Groups         []*UserGroup `dba:"title=已加群组;rel=HAS_MANY,UserGroup(ID->UserID,ID->GroupID)"`
+	Groups         []*UserGroup `dba:"title=已加群组;rel=REF_MANY,UserGroup(ID->UserID,ID->GroupID)"`
 }
 
 type UserProfile struct {

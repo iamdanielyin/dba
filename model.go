@@ -864,7 +864,7 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 	switch rel.Kind {
 	case HasOne, ReferencesOne:
 		// 2.统一查询关联数据
-		DstModel := ns.ModelBy(conn.name, rel.DstSchema)
+		DstModel := ns.Model(rel.DstSchema, &ModelOptions{ConnectionName: conn.name})
 		dstSliceRef, err := GetZeroSliceValueOfField(ru.CreateEmptyElement(), opts.Path)
 		if err != nil {
 			return dst, err
@@ -899,7 +899,7 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 		// 1.收集关联的ID
 		//（同上）
 		// 2.统一查询关联数据
-		DstModel := ns.ModelBy(conn.name, rel.DstSchema)
+		DstModel := ns.Model(rel.DstSchema, &ModelOptions{ConnectionName: conn.name})
 		dstSliceRef, err := GetZeroSliceValueOfField(ru.CreateEmptyElement(), opts.Path)
 		if err != nil {
 			return dst, err
@@ -948,7 +948,7 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 			for _, v := range allBrgData {
 				allDstIds = append(allDstIds, v[rel.BrgDstField])
 			}
-			DstModel := ns.ModelBy(conn.name, rel.DstSchema)
+			DstModel := ns.Model(rel.DstSchema, &ModelOptions{ConnectionName: conn.name})
 			allDstSliceRef, err := GetZeroSliceValueOfField(ru.CreateEmptyElement(), opts.Path)
 			if err != nil {
 				return dst, err
@@ -997,7 +997,7 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 			}
 		} else {
 			// 2.统一查询关联数据
-			BrgModel := ns.ModelBy(conn.name, rel.BrgSchema)
+			BrgModel := ns.Model(rel.BrgSchema, &ModelOptions{ConnectionName: conn.name})
 			allBrgSliceRef, err := GetZeroSliceValueOfField(ru.CreateEmptyElement(), opts.Path)
 			if err != nil {
 				return dst, err
@@ -1041,7 +1041,7 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 	return dst, nil
 }
 
-func relatesWriteOnCreate(input any, conn *Connection, sch *Schema, opts *RelatesWriteOptions) error {
+func relatesWriteOnCreate(input any, SrcModel *DataModel, conn *Connection, sch *Schema, opts *RelatesWriteOptions) error {
 	input = Item2List(input)
 	docs := NewReflectValue(input)
 
@@ -1099,7 +1099,7 @@ func relatesWriteOnCreate(input any, conn *Connection, sch *Schema, opts *Relate
 			}
 
 			rel := field.Relation
-			srcVal, has := docValues[rel.SrcField]
+			srcId, has := docValues[rel.SrcField]
 			if !has {
 				continue
 			}
@@ -1107,17 +1107,17 @@ func relatesWriteOnCreate(input any, conn *Connection, sch *Schema, opts *Relate
 			if dstSch == nil {
 				continue
 			}
-			value := NewReflectValue(v)
-			DstModel := ns.ModelBy(conn.name, rel.DstSchema)
+			relatesDoc := NewReflectValue(v)
+			DstModel := ns.Model(rel.DstSchema, &ModelOptions{ConnectionName: conn.name})
 			dst := NewVar(v)
 			switch rel.Kind {
 			case HasOne:
-				if err := DstModel.Find(fmt.Sprintf("%s", rel.DstField), srcVal).One(dst.Addr().Interface()); err != nil {
+				if err := DstModel.Find(fmt.Sprintf("%s", rel.DstField), srcId).One(dst.Addr().Interface()); err != nil {
 					return err
 				}
 				storedValue := NewReflectValue(dst).Map()
-				changedValues := value.Map()
-				changedValues[rel.DstField] = srcVal
+				changedValues := relatesDoc.Map()
+				changedValues[rel.DstField] = srcId
 				if id, ok := storedValue[dstSch.PrimaryField().Name]; ok && id != nil {
 					if fieldStrategy[k] >= 3 {
 						// update
@@ -1133,7 +1133,7 @@ func relatesWriteOnCreate(input any, conn *Connection, sch *Schema, opts *Relate
 					}
 				}
 			case HasMany:
-				if err := DstModel.Find(fmt.Sprintf("%s", rel.DstField), srcVal).All(dst.Addr().Interface()); err != nil {
+				if err := DstModel.Find(fmt.Sprintf("%s", rel.DstField), srcId).All(dst.Addr().Interface()); err != nil {
 					return err
 				}
 
@@ -1145,11 +1145,11 @@ func relatesWriteOnCreate(input any, conn *Connection, sch *Schema, opts *Relate
 				for j := 0; j < dst.Len(); j++ {
 					storeDoc := NewReflectValue(dst.Index(j))
 					storeID := storeDoc.FieldByName(dstSch.PrimaryField().Name)
-					for k := 0; k < value.Len(); k++ {
+					for k := 0; k < relatesDoc.Len(); k++ {
 						if doneInputIndex[k] {
 							continue
 						}
-						inputDoc := NewReflectValue(value.Index(k))
+						inputDoc := NewReflectValue(relatesDoc.Index(k))
 						inputID := inputDoc.FieldByName(dstSch.PrimaryField().Name)
 						if inputID.IsZero() {
 							createDocs = append(createDocs, inputDoc.Interface())
@@ -1172,7 +1172,9 @@ func relatesWriteOnCreate(input any, conn *Connection, sch *Schema, opts *Relate
 				//input 有id -- update item
 				if fieldStrategy[k] >= 3 {
 					for id, item := range updateDocs {
-						if _, err := DstModel.Find(fmt.Sprintf("%s", dstSch.PrimaryField().Name), id).Update(item.Interface()); err != nil {
+						changedValues := item.Map()
+						changedValues[rel.DstField] = srcId
+						if _, err := DstModel.Find(fmt.Sprintf("%s", dstSch.PrimaryField().Name), id).Update(changedValues); err != nil {
 							return err
 						}
 					}
@@ -1186,6 +1188,15 @@ func relatesWriteOnCreate(input any, conn *Connection, sch *Schema, opts *Relate
 					}
 				}
 			case ReferencesOne:
+				relatesDocMap := relatesDoc.Map()
+				if dstID, ok := relatesDocMap[rel.DstField]; ok && dstID != nil {
+					updateDoc := map[string]any{
+						rel.SrcField: dstID,
+					}
+					if _, err := SrcModel.Find(fmt.Sprintf("%s", sch.PrimaryField().Name), srcId).Update(updateDoc); err != nil {
+						return err
+					}
+				}
 			case ReferencesMany:
 			}
 		}
