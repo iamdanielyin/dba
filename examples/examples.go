@@ -21,7 +21,7 @@ type User struct {
 	DefaultAddress *Address     `dba:"title=默认收货地址;rel=HAS_ONE,DefaultAddressID->UserID;rel_filter=IsDefault:true"`
 	TenantID       uint         `dba:"title=所属租户ID"`
 	Tenant         *Tenant      `dba:"title=所属租户;rel=REF_ONE,TenantID->ID"`
-	Tags           []*Tag       `dba:"title=已有标签;rel=REF_MANY,user_tag_refers(id->User_id,id->tag_id)"` // 直接对表
+	Tags           []*Tag       `dba:"title=已有标签;rel=REF_MANY,user_tag_refers(id->user_id,id->tag_id)"` // 直接对表
 	Groups         []*UserGroup `dba:"title=已加群组;rel=REF_MANY,UserGroup(ID->UserID,ID->GroupID)"`
 }
 

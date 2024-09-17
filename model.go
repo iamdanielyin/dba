@@ -462,9 +462,12 @@ func parseWhere(sch *Schema, filters []*Filter) (string, []any) {
 								} else {
 									subSQLs = append(subSQLs, fmt.Sprintf("(%s IS NOT NULL)", key))
 								}
-
 							} else {
-								subSQLs = append(subSQLs, fmt.Sprintf("(%s IS NULL)", key))
+								if field != nil && field.Type == String {
+									subSQLs = append(subSQLs, fmt.Sprintf("(%s IS NULL OR %s <> '')", key, key))
+								} else {
+									subSQLs = append(subSQLs, fmt.Sprintf("(%s IS NULL)", key))
+								}
 							}
 						default:
 							subSQLs = append(subSQLs, fmt.Sprintf("(%s = ?)", key))
@@ -1041,10 +1044,7 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 	return dst, nil
 }
 
-func relatesWriteOnCreate(input any, SrcModel *DataModel, conn *Connection, sch *Schema, opts *RelatesWriteOptions) error {
-	input = Item2List(input)
-	docs := NewReflectValue(input)
-
+func calcFieldStrategy(sch *Schema, opts *RelatesWriteOptions) map[string]int {
 	fieldStrategy := make(map[string]int)
 	if opts != nil {
 		for _, item := range opts.IgnoreFields {
@@ -1084,10 +1084,16 @@ func relatesWriteOnCreate(input any, SrcModel *DataModel, conn *Connection, sch 
 			}
 		}
 	}
+	return fieldStrategy
+}
 
+func relatesWriteOnCreate(in any, SrcModel *DataModel, conn *Connection, sch *Schema, opts *RelatesWriteOptions) error {
+	inputDocs := NewReflectValue(Item2List(in))
+	fieldStrategy := calcFieldStrategy(sch, opts)
 	ns := conn.ns
-	for i := 0; i < docs.Len(); i++ {
-		item := NewReflectValue(docs.Index(i))
+
+	for i := 0; i < inputDocs.Len(); i++ {
+		item := NewReflectValue(inputDocs.Index(i))
 		docValues := item.Map()
 		if len(docValues) == 0 {
 			continue
@@ -1198,12 +1204,64 @@ func relatesWriteOnCreate(input any, SrcModel *DataModel, conn *Connection, sch 
 					}
 				}
 			case ReferencesMany:
+				if rel.BrgIsNative {
+					var allBrgData = make([]map[string]any, 0)
+					if err := conn.Query(&allBrgData, fmt.Sprintf(`SELECT * FROM %s WHERE %s = ?`, rel.BrgSchema, rel.BrgSrcField), srcId); err != nil {
+						return err
+					}
+
+					var createDocs []any
+					var deleteFilters []*Filter
+
+					doneInputIndex := make(map[int]bool)
+					for j, brgData := range allBrgData {
+						dstId, ok := brgData[rel.BrgDstField]
+						if !ok || dstId == nil {
+							deleteFilters = append(deleteFilters, And(rel.BrgSrcField, srcId, rel.BrgDstField+" $EXISTS", false))
+							continue
+						}
+						for k := 0; k < relatesDoc.Len(); k++ {
+							if doneInputIndex[k] {
+								continue
+							}
+							inputDoc := NewReflectValue(relatesDoc.Index(k))
+							inputID := inputDoc.FieldByName(dstSch.PrimaryField().Name)
+							if inputID.IsZero() || reflect.DeepEqual(dstId, inputID.Interface()) {
+								continue
+							}
+							if !reflect.DeepEqual(dstId, inputID.Interface()) {
+								createDocs = append(createDocs, inputDoc.Interface())
+							} else {
+								deleteDocIDs = append(deleteDocIDs, storeID.Interface())
+							}
+						}
+					}
+					for j := 0; j < dst.Len(); j++ {
+						storeDoc := NewReflectValue(dst.Index(j))
+						storeID := storeDoc.FieldByName(dstSch.PrimaryField().Name)
+						for k := 0; k < relatesDoc.Len(); k++ {
+							if doneInputIndex[k] {
+								continue
+							}
+							inputDoc := NewReflectValue(relatesDoc.Index(k))
+							inputID := inputDoc.FieldByName(dstSch.PrimaryField().Name)
+							if inputID.IsZero() {
+								createDocs = append(createDocs, inputDoc.Interface())
+							} else if reflect.DeepEqual(storeID.Interface(), inputID.Interface()) {
+								if !storeID.IsZero() {
+									updateDocs[storeID.Interface()] = inputDoc
+								}
+							} else {
+								deleteDocIDs = append(deleteDocIDs, storeID.Interface())
+							}
+							doneInputIndex[k] = true
+						}
+					}
+				} else {
+
+				}
 			}
 		}
 	}
-	return nil
-}
-
-func relatesWriteOnUpdate(inputValues any, conn *Connection, sch *Schema, opts *RelatesWriteOptions) error {
 	return nil
 }
