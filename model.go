@@ -47,10 +47,10 @@ type ConflictUpdateOptions struct {
 // 创建时/更新时
 // * HAS_ONE：根据关系字段查询--有档案修改，无档案新增
 // * HAS_MANY：根据关系字段查询
-//   1. 替换模式：无ID创建，有ID更新关系字段+其他字段（如有），删除不在范围内的档案（默认策略）
+//   -1. 忽略模式：无
+//   1. 追加模式：无ID创建
 //   2. 更新模式：无ID创建，有ID更新关系字段+其他字段（如有）
-//   3. 追加模式：无ID创建
-//   4. 忽略模式：无
+//   3. 替换模式：无ID创建，有ID更新关系字段+其他字段（如有），删除不在范围内的档案（默认策略）
 // * REF_ONE：更新关系字段（忽略引用档案传参）
 // * REF_MANY：更新中间表（忽略引用档案传参）
 //
@@ -61,10 +61,10 @@ type ConflictUpdateOptions struct {
 // * REF_MANY：删除关系（清空中间表）
 
 type RelatesWriteOptions struct {
-	IgnoreFields  []string // 无 1
-	AppendFields  []string // 无ID创建 2
-	UpsertFields  []string // 无ID创建；有ID更新关系字段+其他字段（如有） 3
-	ReplaceFields []string // 无ID创建；有ID更新关系字段+其他字段（如有）；删除不在范围内的档案（默认策略） 4
+	IgnoreFields  []string // 无 -1
+	AppendFields  []string // 无ID创建 1
+	UpsertFields  []string // 无ID创建；有ID更新关系字段+其他字段（如有） 2
+	ReplaceFields []string // 无ID创建；有ID更新关系字段+其他字段（如有）；删除不在范围内的档案（默认策略） 3
 }
 
 func (dm *DataModel) Create(value any, options ...*CreateOptions) error {
@@ -1093,23 +1093,23 @@ func relatesWriteOnCreate(in any, SrcModel *DataModel, conn *Connection, sch *Sc
 	ns := conn.ns
 
 	for i := 0; i < inputDocs.Len(); i++ {
-		item := NewReflectValue(inputDocs.Index(i))
-		docValues := item.Map()
-		if len(docValues) == 0 {
+		inputDoc := NewReflectValue(inputDocs.Index(i))
+		inputDocMap := inputDoc.Map()
+		if len(inputDocMap) == 0 {
 			continue
 		}
-		for k, v := range docValues {
-			field := sch.Fields[k]
-			if !field.Valid() || field.Relation == nil || fieldStrategy[k] == 1 {
+		for name, v := range inputDocMap {
+			field := sch.Fields[name]
+			if !field.Valid() || !field.Relation.Valid() || fieldStrategy[name] <= 0 {
 				continue
 			}
 
 			rel := field.Relation
-			srcId, has := docValues[rel.SrcField]
+			srcId, has := inputDocMap[field.Relation.SrcField]
 			if !has {
 				continue
 			}
-			dstSch := ns.SchemaBy(rel.DstSchema)
+			dstSch := ns.SchemaBy(field.Relation.DstSchema)
 			if dstSch == nil {
 				continue
 			}
@@ -1125,7 +1125,7 @@ func relatesWriteOnCreate(in any, SrcModel *DataModel, conn *Connection, sch *Sc
 				changedValues := relatesDoc.Map()
 				changedValues[rel.DstField] = srcId
 				if id, ok := storedValue[dstSch.PrimaryField().Name]; ok && id != nil {
-					if fieldStrategy[k] >= 3 {
+					if fieldStrategy[name] >= 3 {
 						// update
 						delete(changedValues, dstSch.PrimaryField().Name)
 						if _, err := DstModel.Find(fmt.Sprintf("%s", dstSch.PrimaryField().Name), id).Update(changedValues); err != nil {
@@ -1170,13 +1170,13 @@ func relatesWriteOnCreate(in any, SrcModel *DataModel, conn *Connection, sch *Sc
 					}
 				}
 				//input 无id -- create item
-				if fieldStrategy[k] >= 2 {
+				if fieldStrategy[name] >= 2 {
 					if err := DstModel.Create(createDocs); err != nil {
 						return err
 					}
 				}
 				//input 有id -- update item
-				if fieldStrategy[k] >= 3 {
+				if fieldStrategy[name] >= 3 {
 					for id, item := range updateDocs {
 						changedValues := item.Map()
 						changedValues[rel.DstField] = srcId
@@ -1186,7 +1186,7 @@ func relatesWriteOnCreate(in any, SrcModel *DataModel, conn *Connection, sch *Sc
 					}
 				}
 				//store id不在input中 -- delete item
-				if fieldStrategy[k] >= 4 {
+				if fieldStrategy[name] >= 4 {
 					if len(deleteDocIDs) > 0 {
 						if _, err := DstModel.Find(fmt.Sprintf("%s $IN", dstSch.PrimaryField().Name), deleteDocIDs).Delete(); err != nil {
 							return err
@@ -1205,8 +1205,8 @@ func relatesWriteOnCreate(in any, SrcModel *DataModel, conn *Connection, sch *Sc
 				}
 			case ReferencesMany:
 				if rel.BrgIsNative {
-					var allBrgData = make([]map[string]any, 0)
-					if err := conn.Query(&allBrgData, fmt.Sprintf(`SELECT * FROM %s WHERE %s = ?`, rel.BrgSchema, rel.BrgSrcField), srcId); err != nil {
+					var storeBrgData = make([]map[string]any, 0)
+					if err := conn.Query(&storeBrgData, fmt.Sprintf(`SELECT * FROM %s WHERE %s = ?`, rel.BrgSchema, rel.BrgSrcField), srcId); err != nil {
 						return err
 					}
 
