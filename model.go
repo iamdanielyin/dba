@@ -47,7 +47,7 @@ type ConflictUpdateOptions struct {
 // 创建时/更新时
 // * HAS_ONE：根据关系字段查询--有档案修改，无档案新增
 // * HAS_MANY：根据关系字段查询
-//   -1. 忽略模式：无
+//  -1. 忽略模式：无
 //   1. 追加模式：无ID创建
 //   2. 更新模式：无ID创建，有ID更新关系字段+其他字段（如有）
 //   3. 替换模式：无ID创建，有ID更新关系字段+其他字段（如有），删除不在范围内的档案（默认策略）
@@ -1087,60 +1087,70 @@ func calcFieldStrategy(sch *Schema, opts *RelatesWriteOptions) map[string]int {
 	return fieldStrategy
 }
 
-func relatesWriteOnCreate(in any, SrcModel *DataModel, conn *Connection, sch *Schema, opts *RelatesWriteOptions) error {
-	inputDocs := NewReflectValue(Item2List(in))
+func relatesWriteOnCreate(src any, SrcModel *DataModel, conn *Connection, sch *Schema, opts *RelatesWriteOptions) error {
+	srcList := NewReflectValue(Item2List(src))
 	fieldStrategy := calcFieldStrategy(sch, opts)
 	ns := conn.ns
 
-	for i := 0; i < inputDocs.Len(); i++ {
-		inputDoc := NewReflectValue(inputDocs.Index(i))
-		inputDocMap := inputDoc.Map()
-		if len(inputDocMap) == 0 {
+	for srcIdx := 0; srcIdx < srcList.Len(); srcIdx++ {
+		srcItem := NewReflectValue(srcList.Index(srcIdx))
+		srcItemValues := srcItem.Map()
+		if len(srcItemValues) == 0 {
 			continue
 		}
-		for name, v := range inputDocMap {
+		for name, fieldValue := range srcItemValues {
 			field := sch.Fields[name]
 			if !field.Valid() || !field.Relation.Valid() || fieldStrategy[name] <= 0 {
 				continue
 			}
-
 			rel := field.Relation
-			srcId, has := inputDocMap[field.Relation.SrcField]
+			srcId, has := srcItemValues[rel.SrcField]
 			if !has {
 				continue
 			}
-			dstSch := ns.SchemaBy(field.Relation.DstSchema)
+			dstSch := ns.SchemaBy(rel.DstSchema)
 			if dstSch == nil {
 				continue
 			}
-			relatesDoc := NewReflectValue(v)
+
 			DstModel := ns.Model(rel.DstSchema, &ModelOptions{ConnectionName: conn.name})
-			dst := NewVar(v)
 			switch rel.Kind {
 			case HasOne:
-				if err := DstModel.Find(fmt.Sprintf("%s", rel.DstField), srcId).One(dst.Addr().Interface()); err != nil {
+				storedDoc := NewReflectValue(NewVar(fieldValue))
+				if err := DstModel.Find(fmt.Sprintf("%s", rel.DstField), srcId).One(storedDoc.Addr().Interface()); err != nil {
 					return err
 				}
-				storedValue := NewReflectValue(dst).Map()
-				changedValues := relatesDoc.Map()
-				changedValues[rel.DstField] = srcId
-				if id, ok := storedValue[dstSch.PrimaryField().Name]; ok && id != nil {
-					if fieldStrategy[name] >= 3 {
+				storedDocValues := storedDoc.Map()
+
+				inputDocValues := NewReflectValue(fieldValue).Map()
+				inputDocValues[rel.DstField] = srcId
+
+				// 删除子实体的主键：要保证只存在一条子实体记录（根据关系字段联查）
+				for _, pk := range dstSch.PrimaryFields() {
+					delete(inputDocValues, pk.Name)
+				}
+
+				if id, ok := storedDocValues[dstSch.PrimaryField().Name]; ok && id != nil {
+					if fieldStrategy[name] >= 2 {
 						// update
-						delete(changedValues, dstSch.PrimaryField().Name)
-						if _, err := DstModel.Find(fmt.Sprintf("%s", dstSch.PrimaryField().Name), id).Update(changedValues); err != nil {
+						if _, err := DstModel.Find(fmt.Sprintf("%s", dstSch.PrimaryField().Name), id).Update(inputDocValues); err != nil {
 							return err
 						}
 					}
 				} else {
 					// create
-					if err := DstModel.Create(v); err != nil {
+					if err := DstModel.Create(inputDocValues); err != nil {
 						return err
 					}
 				}
 			case HasMany:
-				if err := DstModel.Find(fmt.Sprintf("%s", rel.DstField), srcId).All(dst.Addr().Interface()); err != nil {
+				storedDocs := NewReflectValue(NewVar(fieldValue))
+				if err := DstModel.Find(fmt.Sprintf("%s", rel.DstField), srcId).All(storedDocs.Addr().Interface()); err != nil {
 					return err
+				}
+				inputDocs := NewReflectValue(fieldValue)
+				for i := 0; i < inputDocs.Len(); i++ {
+
 				}
 
 				var createDocs []any
@@ -1151,11 +1161,11 @@ func relatesWriteOnCreate(in any, SrcModel *DataModel, conn *Connection, sch *Sc
 				for j := 0; j < dst.Len(); j++ {
 					storeDoc := NewReflectValue(dst.Index(j))
 					storeID := storeDoc.FieldByName(dstSch.PrimaryField().Name)
-					for k := 0; k < relatesDoc.Len(); k++ {
+					for k := 0; k < relatesDocs.Len(); k++ {
 						if doneInputIndex[k] {
 							continue
 						}
-						inputDoc := NewReflectValue(relatesDoc.Index(k))
+						inputDoc := NewReflectValue(relatesDocs.Index(k))
 						inputID := inputDoc.FieldByName(dstSch.PrimaryField().Name)
 						if inputID.IsZero() {
 							createDocs = append(createDocs, inputDoc.Interface())
@@ -1194,8 +1204,8 @@ func relatesWriteOnCreate(in any, SrcModel *DataModel, conn *Connection, sch *Sc
 					}
 				}
 			case ReferencesOne:
-				relatesDocMap := relatesDoc.Map()
-				if dstID, ok := relatesDocMap[rel.DstField]; ok && dstID != nil {
+				relatesDocsMap := relatesDocs.Map()
+				if dstID, ok := relatesDocsMap[rel.DstField]; ok && dstID != nil {
 					updateDoc := map[string]any{
 						rel.SrcField: dstID,
 					}
@@ -1214,7 +1224,7 @@ func relatesWriteOnCreate(in any, SrcModel *DataModel, conn *Connection, sch *Sc
 					var deleteFilters []*Filter
 
 					doneInputIndex := make(map[int]bool)
-					for j, brgData := range allBrgData {
+					for _, brgData := range storeBrgData {
 						dstId, ok := brgData[rel.BrgDstField]
 						if !ok || dstId == nil {
 							deleteFilters = append(deleteFilters, And(rel.BrgSrcField, srcId, rel.BrgDstField+" $EXISTS", false))
