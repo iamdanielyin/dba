@@ -751,11 +751,20 @@ func (r *Result) Update(doc any) (int, error) {
 	for k, v := range pairs {
 		f := fields[k]
 		if f.Valid() && f.NativeName != "" {
-			sets = append(sets, fmt.Sprintf("%s = ?", f.NativeName))
+			if s, isStr := v.(string); isStr && s == SetToNullFlag {
+				sets = append(sets, fmt.Sprintf("%s = NULL", f.NativeName))
+			} else {
+				sets = append(sets, fmt.Sprintf("%s = ?", f.NativeName))
+				attrs = append(attrs, v)
+			}
 		} else {
-			sets = append(sets, fmt.Sprintf("%s = ?", k))
+			if s, isStr := v.(string); isStr && s == SetToNullFlag {
+				sets = append(sets, fmt.Sprintf("%s = NULL", k))
+			} else {
+				sets = append(sets, fmt.Sprintf("%s = ?", k))
+				attrs = append(attrs, v)
+			}
 		}
-		attrs = append(attrs, v)
 	}
 	if len(sets) > 0 {
 		data["Sets"] = strings.Join(sets, ", ")
@@ -1125,16 +1134,27 @@ func relatesWriteOnCreate(src any, SrcModel *DataModel, conn *Connection, sch *S
 				inputDocValues := NewReflectValue(fieldValue).Map()
 				inputDocValues[rel.DstField] = srcId
 
-				// 删除子实体的主键：要保证只存在一条子实体记录（根据关系字段联查）
-				for _, pk := range dstSch.PrimaryFields() {
-					delete(inputDocValues, pk.Name)
-				}
+				inputId, hasInputId := inputDocValues[dstSch.PrimaryField().Name]
+				storedId, hasStoredId := storedDocValues[dstSch.PrimaryField().Name]
 
-				if id, ok := storedDocValues[dstSch.PrimaryField().Name]; ok && id != nil {
+				if hasInputId && !IsNilOrZero(inputId) {
+					// 传入有ID
+					filter := make(map[string]any)
+					values := make(map[string]any)
+					for k, v := range inputDocValues {
+						f := dstSch.Fields[k]
+						if f.IsPrimary {
+							filter[k] = v
+						} else {
+							values[k] = v
+						}
+					}
 					if fieldStrategy[name] >= 2 {
 						// update
-						if _, err := DstModel.Find(fmt.Sprintf("%s", dstSch.PrimaryField().Name), id).Update(inputDocValues); err != nil {
-							return err
+						if len(filter) > 0 && len(values) > 0 {
+							if _, err := DstModel.Find(filter).Update(values); err != nil {
+								return err
+							}
 						}
 					}
 				} else {
@@ -1143,19 +1163,42 @@ func relatesWriteOnCreate(src any, SrcModel *DataModel, conn *Connection, sch *S
 						return err
 					}
 				}
+				if hasStoredId && !IsNilOrZero(storedId) && !reflect.DeepEqual(storedId, inputId) {
+					// 不相同做置空关系字段
+					filter := make(map[string]any)
+					for _, f := range dstSch.PrimaryFields() {
+						if v := storedDocValues[f.Name]; !IsNilOrZero(v) {
+							filter[f.Name] = v
+						}
+					}
+					if len(filter) > 0 {
+						if fieldStrategy[name] >= 3 {
+							if _, err := DstModel.Find(filter).Delete(); err != nil {
+								return err
+							}
+						} else {
+							values := map[string]any{
+								rel.DstField: SetToNullFlag,
+							}
+							if _, err := DstModel.Find(filter).Update(values); err != nil {
+								return err
+							}
+						}
+					}
+				}
 			case HasMany:
 				storedDocs := NewReflectValue(NewVar(fieldValue))
 				if err := DstModel.Find(fmt.Sprintf("%s", rel.DstField), srcId).All(storedDocs.Addr().Interface()); err != nil {
 					return err
 				}
 				inputDocs := NewReflectValue(fieldValue)
-				for i := 0; i < inputDocs.Len(); i++ {
-
-				}
 
 				var createDocs []any
 				var updateDocs = make(map[any]*ReflectValue)
 				var deleteDocIDs []any
+				for i := 0; i < inputDocs.Len(); i++ {
+
+				}
 
 				doneInputIndex := make(map[int]bool)
 				for j := 0; j < dst.Len(); j++ {

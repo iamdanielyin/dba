@@ -538,3 +538,32 @@ func Item2List(dst any) any {
 	}
 	return dst
 }
+
+func IsNilOrZero(a any) bool {
+	if a == nil {
+		return true
+	}
+
+	v := reflect.ValueOf(a)
+	if !v.IsValid() {
+		return true
+	}
+
+	// Handle pointers and interfaces
+	for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return true
+		}
+		v = v.Elem()
+		if !v.IsValid() {
+			return true
+		}
+	}
+
+	// Use IsZero for Go versions >= 1.13
+	if v.IsZero() {
+		return true
+	}
+
+	return false
+}

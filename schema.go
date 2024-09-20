@@ -28,6 +28,8 @@ const (
 	Array   SchemaType = "array"
 )
 
+const SetToNullFlag = "$$$NULL$$$"
+
 var scalarTypeMap = map[SchemaType]bool{
 	String:  true,
 	Integer: true,
