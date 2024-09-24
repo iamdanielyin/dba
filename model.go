@@ -30,11 +30,19 @@ const (
 
 type RelationWriteMode string
 
+const (
+	RelatesWriteModeIgnore  RelationWriteMode = "IGNORE"
+	RelatesWriteModeAppend  RelationWriteMode = "APPEND"
+	RelatesWriteModeUpsert  RelationWriteMode = "UPSERT"
+	RelatesWriteModeReplace RelationWriteMode = "REPLACE"
+)
+
 type CreateOptions struct {
-	BatchSize       int
-	SharedTx        bool                   // 用于指定是否所有批次共用一个事务
-	ConflictUpdates *ConflictUpdateOptions // 指定冲突处理方式
-	RelatesWrites   *RelatesWriteOptions
+	BatchSize        int
+	SharedTx         bool                   // 用于指定是否所有批次共用一个事务
+	ConflictUpdates  *ConflictUpdateOptions // 指定冲突处理方式
+	RelatesWriteMode RelationWriteMode
+	RelatesWrites    *RelatesWriteOptions
 }
 
 type ConflictUpdateOptions struct {
@@ -1096,6 +1104,11 @@ func calcFieldStrategy(sch *Schema, opts *RelatesWriteOptions) map[string]int {
 	return fieldStrategy
 }
 
+type updatePair struct {
+	filter *Filter
+	values any
+}
+
 func relatesWriteOnCreate(src any, SrcModel *DataModel, conn *Connection, sch *Schema, opts *RelatesWriteOptions) error {
 	srcList := NewReflectValue(Item2List(src))
 	fieldStrategy := calcFieldStrategy(sch, opts)
@@ -1194,54 +1207,77 @@ func relatesWriteOnCreate(src any, SrcModel *DataModel, conn *Connection, sch *S
 				inputDocs := NewReflectValue(fieldValue)
 
 				var createDocs []any
-				var updateDocs = make(map[any]*ReflectValue)
-				var deleteDocIDs []any
+				var updateDocs []*updatePair
+
+				var existItems []map[string]any
 				for i := 0; i < inputDocs.Len(); i++ {
+					inputDoc := NewReflectValue(inputDocs.Index(i))
+					inputDocValues := inputDoc.Map()
+					inputDocValues[rel.DstField] = srcId
 
+					filter := make(map[string]any)
+					for _, pk := range dstSch.PrimaryFields() {
+						v := inputDocValues[pk.Name]
+						if !IsNilOrZero(v) {
+							filter[pk.Name] = v
+						}
+						delete(inputDocValues, pk.Name)
+					}
+					if len(filter) > 0 {
+						// 有主键，走update
+						updateDocs = append(updateDocs, &updatePair{
+							filter: And(filter),
+							values: inputDocValues,
+						})
+						existItems = append(existItems, filter)
+					} else {
+						// 无主键，走create
+						createDocs = append(createDocs, inputDocValues)
+					}
 				}
 
-				doneInputIndex := make(map[int]bool)
-				for j := 0; j < dst.Len(); j++ {
-					storeDoc := NewReflectValue(dst.Index(j))
-					storeID := storeDoc.FieldByName(dstSch.PrimaryField().Name)
-					for k := 0; k < relatesDocs.Len(); k++ {
-						if doneInputIndex[k] {
-							continue
-						}
-						inputDoc := NewReflectValue(relatesDocs.Index(k))
-						inputID := inputDoc.FieldByName(dstSch.PrimaryField().Name)
-						if inputID.IsZero() {
-							createDocs = append(createDocs, inputDoc.Interface())
-						} else if reflect.DeepEqual(storeID.Interface(), inputID.Interface()) {
-							if !storeID.IsZero() {
-								updateDocs[storeID.Interface()] = inputDoc
+				var deleteFilters []any
+				for j := 0; j < storedDocs.Len(); j++ {
+					storedDoc := NewReflectValue(storedDocs.Index(j))
+					storedDocValues := storedDoc.Map()
+					for _, ids := range existItems {
+						exists := true
+						for k, inputID := range ids {
+							storedID := storedDocValues[k]
+							if !reflect.DeepEqual(inputID, storedID) {
+								exists = false
 							}
-						} else {
-							deleteDocIDs = append(deleteDocIDs, storeID.Interface())
 						}
-						doneInputIndex[k] = true
+						if !exists {
+							deleteFilters = append(deleteFilters, And(ids))
+						}
 					}
 				}
-				//input 无id -- create item
-				if fieldStrategy[name] >= 2 {
-					if err := DstModel.Create(createDocs); err != nil {
-						return err
-					}
-				}
-				//input 有id -- update item
-				if fieldStrategy[name] >= 3 {
-					for id, item := range updateDocs {
-						changedValues := item.Map()
-						changedValues[rel.DstField] = srcId
-						if _, err := DstModel.Find(fmt.Sprintf("%s", dstSch.PrimaryField().Name), id).Update(changedValues); err != nil {
+
+				if fieldStrategy[name] >= 1 {
+					// APPEND
+					if len(createDocs) > 0 {
+						if err := DstModel.Create(createDocs); err != nil {
 							return err
 						}
 					}
 				}
-				//store id不在input中 -- delete item
-				if fieldStrategy[name] >= 4 {
-					if len(deleteDocIDs) > 0 {
-						if _, err := DstModel.Find(fmt.Sprintf("%s $IN", dstSch.PrimaryField().Name), deleteDocIDs).Delete(); err != nil {
+
+				if fieldStrategy[name] >= 2 {
+					// UPSERT
+					if len(updateDocs) > 0 {
+						for _, item := range updateDocs {
+							if _, err := DstModel.Find(item.filter).Update(item.values); err != nil {
+								return err
+							}
+						}
+					}
+				}
+
+				if fieldStrategy[name] >= 3 {
+					// REPLACE
+					if len(deleteFilters) > 0 {
+						if _, err := DstModel.Find(Or(deleteFilters...)).Delete(); err != nil {
 							return err
 						}
 					}
