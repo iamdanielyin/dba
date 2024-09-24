@@ -1283,12 +1283,11 @@ func relatesWriteOnCreate(src any, SrcModel *DataModel, conn *Connection, sch *S
 					}
 				}
 			case ReferencesOne:
-				relatesDocsMap := relatesDocs.Map()
-				if dstID, ok := relatesDocsMap[rel.DstField]; ok && dstID != nil {
-					updateDoc := map[string]any{
+				inputDocValues := NewReflectValue(fieldValue).Map()
+				if dstID, ok := inputDocValues[rel.DstField]; ok && dstID != nil {
+					if _, err := SrcModel.Find(rel.SrcField, dstID).Update(map[string]any{
 						rel.SrcField: dstID,
-					}
-					if _, err := SrcModel.Find(fmt.Sprintf("%s", sch.PrimaryField().Name), srcId).Update(updateDoc); err != nil {
+					}); err != nil {
 						return err
 					}
 				}
