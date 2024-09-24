@@ -58,7 +58,8 @@ type Tag struct {
 }
 
 type UserGroup struct {
+	Group    *Group    `dba:"title=关联群组;rel=REF_ONE,GroupID->ID"`
+	GroupID  uint      `dba:"title=关联群组ID"`
 	UserID   uint      `dba:"title=用户ID"`
-	GroupID  uint      `dba:"title=群组ID"`
 	JoinedAt time.Time `dba:"title=加入时间"`
 }

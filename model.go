@@ -1301,59 +1301,11 @@ func relatesWriteOnCreate(src any, SrcModel *DataModel, conn *Connection, sch *S
 					}
 				}
 			case ReferencesMany:
+				// 查询中间表得到引用ID
+				// 比对输入实体和存储实体的差异
+				// 重新create/update/delete中间表数据
+				// 【注意：整个过程只有中间表数据被更新】
 				if rel.BrgIsNative {
-					var storeBrgData = make([]map[string]any, 0)
-					if err := conn.Query(&storeBrgData, fmt.Sprintf(`SELECT * FROM %s WHERE %s = ?`, rel.BrgSchema, rel.BrgSrcField), srcId); err != nil {
-						return err
-					}
-
-					var createDocs []any
-					var deleteFilters []*Filter
-
-					doneInputIndex := make(map[int]bool)
-					for _, brgData := range storeBrgData {
-						dstId, ok := brgData[rel.BrgDstField]
-						if !ok || dstId == nil {
-							deleteFilters = append(deleteFilters, And(rel.BrgSrcField, srcId, rel.BrgDstField+" $EXISTS", false))
-							continue
-						}
-						for k := 0; k < relatesDoc.Len(); k++ {
-							if doneInputIndex[k] {
-								continue
-							}
-							inputDoc := NewReflectValue(relatesDoc.Index(k))
-							inputID := inputDoc.FieldByName(dstSch.PrimaryField().Name)
-							if inputID.IsZero() || reflect.DeepEqual(dstId, inputID.Interface()) {
-								continue
-							}
-							if !reflect.DeepEqual(dstId, inputID.Interface()) {
-								createDocs = append(createDocs, inputDoc.Interface())
-							} else {
-								deleteDocIDs = append(deleteDocIDs, storeID.Interface())
-							}
-						}
-					}
-					for j := 0; j < dst.Len(); j++ {
-						storeDoc := NewReflectValue(dst.Index(j))
-						storeID := storeDoc.FieldByName(dstSch.PrimaryField().Name)
-						for k := 0; k < relatesDoc.Len(); k++ {
-							if doneInputIndex[k] {
-								continue
-							}
-							inputDoc := NewReflectValue(relatesDoc.Index(k))
-							inputID := inputDoc.FieldByName(dstSch.PrimaryField().Name)
-							if inputID.IsZero() {
-								createDocs = append(createDocs, inputDoc.Interface())
-							} else if reflect.DeepEqual(storeID.Interface(), inputID.Interface()) {
-								if !storeID.IsZero() {
-									updateDocs[storeID.Interface()] = inputDoc
-								}
-							} else {
-								deleteDocIDs = append(deleteDocIDs, storeID.Interface())
-							}
-							doneInputIndex[k] = true
-						}
-					}
 				} else {
 
 				}
