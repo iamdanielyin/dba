@@ -1285,10 +1285,19 @@ func relatesWriteOnCreate(src any, SrcModel *DataModel, conn *Connection, sch *S
 			case ReferencesOne:
 				inputDocValues := NewReflectValue(fieldValue).Map()
 				if dstID, ok := inputDocValues[rel.DstField]; ok && dstID != nil {
-					if _, err := SrcModel.Find(rel.SrcField, dstID).Update(map[string]any{
-						rel.SrcField: dstID,
-					}); err != nil {
-						return err
+					filter := make(map[string]any)
+					for _, pk := range dstSch.PrimaryFields() {
+						v := inputDocValues[pk.Name]
+						if !IsNilOrZero(v) {
+							filter[pk.Name] = v
+						}
+					}
+					if len(filter) > 0 {
+						if _, err := SrcModel.Find(filter).Update(map[string]any{
+							rel.SrcField: dstID,
+						}); err != nil {
+							return err
+						}
 					}
 				}
 			case ReferencesMany:
