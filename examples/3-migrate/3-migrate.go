@@ -19,8 +19,8 @@ func main() {
 	}
 
 	err := dba.RegisterSchema(
-		&examples.Role{},
-		&examples.Permission{},
+		&examples.Group{},
+		&examples.Tag{},
 	)
 	if err != nil {
 		log.Fatal(err)

@@ -17,29 +17,29 @@ func main() {
 	}
 
 	err := dba.RegisterSchema(
-		&examples.Org{},
+		&examples.Tenant{},
 		&examples.User{},
-		&examples.Profile{},
-		&examples.Account{},
-		&examples.Dept{},
-		&examples.UserDept{},
-		&examples.Role{},
-		&examples.Permission{},
+		&examples.UserProfile{},
+		&examples.Address{},
+		&examples.Group{},
+		&examples.Tag{},
+		&examples.UserGroup{},
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
 	schemaNames := []string{
-		"Org",
+		"Tenant",
 		"User",
-		"Profile",
-		"Account",
-		"Dept",
-		"UserDept",
-		"Permission",
+		"UserProfile",
+		"Address",
+		"Group",
+		"Tag",
+		"UserGroup",
 	}
 	for _, name := range schemaNames {
 		ModelSchema := dba.SchemaBy(name)
 		log.Println(ModelSchema.Name, ModelSchema.NativeName)
 	}
+
 }

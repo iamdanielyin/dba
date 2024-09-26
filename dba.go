@@ -40,12 +40,8 @@ func LookupSchema(name ...string) map[string]*Schema {
 	return DefaultNamespace.LookupSchema(name...)
 }
 
-func Model(schemaName string) *DataModel {
-	return DefaultNamespace.Model(schemaName)
-}
-
-func ModelBy(connectionName, schemaName string) *DataModel {
-	return DefaultNamespace.ModelBy(connectionName, schemaName)
+func Model(schemaName string, options ...*ModelOptions) *DataModel {
+	return DefaultNamespace.Model(schemaName, options...)
 }
 
 func Exec(query string, args ...any) (int, error) {

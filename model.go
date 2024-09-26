@@ -15,6 +15,7 @@ type DataModel struct {
 	conn           *Connection
 	schema         *Schema
 	xdb            *sqlx.DB
+	xtx            *sqlx.Tx
 	createTemplate *template.Template
 	deleteTemplate *template.Template
 	updateTemplate *template.Template
@@ -1109,13 +1110,13 @@ type updatePair struct {
 	values any
 }
 
-func relatesWriteOnCreate(src any, SrcModel *DataModel, conn *Connection, sch *Schema, opts *RelatesWriteOptions) error {
-	srcList := NewReflectValue(Item2List(src))
+func relatesWriteOnCreate(in any, SrcModel *DataModel, conn *Connection, sch *Schema, opts *RelatesWriteOptions) error {
+	inList := NewReflectValue(Item2List(in))
 	fieldStrategy := calcFieldStrategy(sch, opts)
 	ns := conn.ns
 
-	for srcIdx := 0; srcIdx < srcList.Len(); srcIdx++ {
-		srcItem := NewReflectValue(srcList.Index(srcIdx))
+	for inIdx := 0; inIdx < inList.Len(); inIdx++ {
+		srcItem := NewReflectValue(inList.Index(inIdx))
 		srcItemValues := srcItem.Map()
 		if len(srcItemValues) == 0 {
 			continue
@@ -1204,12 +1205,12 @@ func relatesWriteOnCreate(src any, SrcModel *DataModel, conn *Connection, sch *S
 				if err := DstModel.Find(fmt.Sprintf("%s", rel.DstField), srcId).All(storedDocs.Addr().Interface()); err != nil {
 					return err
 				}
-				inputDocs := NewReflectValue(fieldValue)
 
 				var createDocs []any
 				var updateDocs []*updatePair
 
 				var existItems []map[string]any
+				inputDocs := NewReflectValue(fieldValue)
 				for i := 0; i < inputDocs.Len(); i++ {
 					inputDoc := NewReflectValue(inputDocs.Index(i))
 					inputDocValues := inputDoc.Map()
@@ -1305,10 +1306,103 @@ func relatesWriteOnCreate(src any, SrcModel *DataModel, conn *Connection, sch *S
 				// 比对输入实体和存储实体的差异
 				// 重新create/update/delete中间表数据
 				// 【注意：整个过程只有中间表数据被更新】
+				var (
+					brgSchemaNative   string
+					brgSrcFieldNative string
+					brgDstFieldNative string
+				)
+				var (
+					brgSch      *Schema
+					brgSrcField *Field
+					brgDstField *Field
+				)
 				if rel.BrgIsNative {
+					brgSchemaNative = rel.BrgSchema
+					brgSrcFieldNative = rel.BrgSrcField
+					brgDstFieldNative = rel.BrgDstField
 				} else {
+					brgSch = ns.SchemaBy(rel.BrgSchema)
+					if brgSch == nil {
+						continue
+					}
+					brgSrcField = brgSch.Fields[rel.BrgSrcField]
+					brgDstField = brgSch.Fields[rel.BrgDstField]
 
+					brgSchemaNative = brgSch.Name
+					brgSrcFieldNative = brgSrcField.NativeName
+					brgDstFieldNative = brgDstField.NativeName
 				}
+				var storedDocs *ReflectValue
+				if rel.BrgIsNative {
+					storedDocs = NewReflectValue(make([]map[string]any, 0))
+				} else {
+					storedDocs = NewReflectValue(NewVar(fieldValue))
+				}
+				if err := conn.Query(storedDocs.Addr().Interface(), fmt.Sprintf(`SELECT %s FROM %s WHERE %s = ?`, brgDstFieldNative, brgSchemaNative, brgSrcFieldNative), srcId); err != nil {
+					return err
+				}
+
+				var updateDocs []*updatePair
+
+				inputDocs := NewReflectValue(fieldValue)
+				var existsIDs []any
+				for i := 0; i < inputDocs.Len(); i++ {
+					inputDoc := NewReflectValue(inputDocs.Index(i))
+					inputDocValues := inputDoc.Map()
+
+					var filter = make(map[string]any)
+					var values any
+					if rel.BrgIsNative {
+						// Tag {ID,Name} → dstSch
+						if dnf := dstSch.NativeFields()[rel.DstField]; dnf != nil {
+							v := inputDocValues[dnf.Name]
+							if !IsNilOrZero(v) {
+								filter[dnf.Name] = v
+								existsIDs = append(existsIDs, v)
+							}
+						}
+					} else {
+						// UserGroup {GroupID,UserID,JoinedAt} → brgSch
+						if brgDstField != nil {
+							v := inputDocValues[brgDstField.Name]
+							if !IsNilOrZero(v) {
+								filter[brgDstField.Name] = v
+								inputDocValues[brgSrcField.Name] = srcId
+								values = inputDocValues
+								existsIDs = append(existsIDs, v)
+							}
+						}
+					}
+
+					if len(filter) > 0 {
+						// 有主键，走update
+						updateDocs = append(updateDocs, &updatePair{
+							filter: And(filter),
+							values: values,
+						})
+					}
+				}
+
+				if fieldStrategy[name] >= 1 {
+					// APPEND + UPSERT
+					if len(updateDocs) > 0 {
+						for _, item := range updateDocs {
+							if _, err := DstModel.Find(item.filter).Update(item.values); err != nil {
+								return err
+							}
+						}
+					}
+				}
+
+				if fieldStrategy[name] >= 3 {
+					// REPLACE
+					if len(existsIDs) > 0 {
+						if _, err := DstModel.Find(Or(deleteFilters...)).Delete(); err != nil {
+							return err
+						}
+					}
+				}
+
 			}
 		}
 	}

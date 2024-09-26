@@ -21,7 +21,7 @@ func main() {
 		&examples.User{},
 		&examples.UserProfile{},
 		&examples.Address{},
-		&examples.Tenant{},
+		&examples.Group{},
 		&examples.Tag{},
 		&examples.UserGroup{},
 	)

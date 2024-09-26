@@ -159,6 +159,32 @@ func (ns *Namespace) setRelations() {
 				if rel != nil {
 					needUpdate = true
 					field.Relation = rel
+					if rel.BrgIsNative && rel.BrgSchema != "" {
+						srcField := s.Fields[rel.SrcField]
+						dstField := schs[rel.DstSchema].Fields[rel.DstField]
+
+						mockNativeSchema := Schema{
+							Name:       rel.BrgSchema,
+							NativeName: rel.BrgSchema,
+							Fields: map[string]*Field{
+								rel.BrgSrcField: {
+									Name:       rel.BrgSrcField,
+									NativeName: rel.BrgSrcField,
+									IsRequired: true,
+									Type:       srcField.Type,
+									NativeType: srcField.NativeType,
+								},
+								rel.BrgDstField: {
+									Name:       rel.BrgDstField,
+									NativeName: rel.BrgDstField,
+									IsRequired: true,
+									Type:       dstField.Type,
+									NativeType: dstField.NativeType,
+								},
+							},
+						}
+						_ = ns.RegisterSchema(&mockNativeSchema)
+					}
 				}
 				if field.ItemType != "" {
 					if !scalarTypeMap[SchemaType(field.ItemType)] && schs[field.ItemType] == nil {
@@ -205,9 +231,6 @@ func (ns *Namespace) Model(schemaName string, options ...*ModelOptions) *DataMod
 	if conn == nil {
 		panic(fmt.Errorf("connection not exists: %s", connectionName))
 	}
-	if opts.Tx == nil {
-		opts.Tx = conn.xdb
-	}
 
 	s := ns.SchemaBy(schemaName)
 	if s == nil {
@@ -237,6 +260,7 @@ func (ns *Namespace) Model(schemaName string, options ...*ModelOptions) *DataMod
 		conn:           conn,
 		schema:         s,
 		xdb:            conn.xdb,
+		xtx:            opts.Tx,
 		createTemplate: createTemplate,
 		deleteTemplate: deleteTemplate,
 		updateTemplate: updateTemplate,
