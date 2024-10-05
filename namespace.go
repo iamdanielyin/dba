@@ -132,6 +132,14 @@ func (ns *Namespace) SchemaBy(name string) *Schema {
 	return original.Clone()
 }
 
+func (ns *Namespace) Schemas() []*Schema {
+	var result []*Schema
+	for _, item := range ns.LookupSchema() {
+		result = append(result, item)
+	}
+	return result
+}
+
 func (ns *Namespace) LookupSchema(names ...string) map[string]*Schema {
 	nameMap := make(map[string]bool)
 	for _, name := range names {
