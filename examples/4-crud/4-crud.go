@@ -9,6 +9,7 @@ import (
 )
 
 func main() {
+	// 连接数据源
 	if err := dba.Connect(&dba.ConnectConfig{
 		Driver: dba.MySQL,
 		Dsn:    os.Getenv("MYSQL"),
@@ -16,6 +17,7 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// 注册元数据
 	err := dba.RegisterSchema(
 		&examples.Tenant{},
 		&examples.User{},
@@ -25,10 +27,13 @@ func main() {
 		&examples.Tag{},
 		&examples.UserGroup{},
 	)
+
+	// 自动数据库迁移
 	if err := dba.Session().Init(); err != nil {
 		log.Fatal(err)
 	}
 
+	// 获取操作模型
 	Tenant := dba.Model("Tenant")
 
 	// create
