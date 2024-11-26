@@ -27,3 +27,4 @@ examples/**/schemas.json
 test.db
 schemas.json
 migrations/
+localdb/storage/*

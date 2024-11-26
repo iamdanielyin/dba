@@ -7,9 +7,8 @@ var DefaultNamespace = &Namespace{
 	schemas:     new(sync.Map),
 }
 
-func Connect(config *ConnectConfig) error {
-	_, err := DefaultNamespace.Connect(config)
-	return err
+func Connect(config *ConnectConfig) (*Connection, error) {
+	return DefaultNamespace.Connect(config)
 }
 
 func Session(name ...string) *Connection {

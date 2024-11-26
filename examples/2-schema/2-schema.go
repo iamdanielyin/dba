@@ -5,17 +5,9 @@ import (
 	"github.com/iamdanielyin/dba/examples"
 	_ "github.com/joho/godotenv/autoload"
 	"log"
-	"os"
 )
 
 func main() {
-	if err := dba.Connect(&dba.ConnectConfig{
-		Driver: dba.MySQL,
-		Dsn:    os.Getenv("MYSQL"),
-	}); err != nil {
-		log.Fatal(err)
-	}
-
 	err := dba.RegisterSchema(
 		&examples.Tenant{},
 		&examples.User{},

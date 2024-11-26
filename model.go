@@ -1397,9 +1397,10 @@ func relatesWriteOnCreate(in any, SrcModel *DataModel, conn *Connection, sch *Sc
 				if fieldStrategy[name] >= 3 {
 					// REPLACE
 					if len(existsIDs) > 0 {
-						if _, err := DstModel.Find(Or(deleteFilters...)).Delete(); err != nil {
-							return err
-						}
+						// TODO
+						//if _, err := DstModel.Find(Or(deleteFilters...)).Delete(); err != nil {
+						//	return err
+						//}
 					}
 				}
 

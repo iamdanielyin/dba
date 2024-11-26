@@ -193,18 +193,18 @@ func (s *Schema) NativeFieldNames(names []string, scalarTypeOnly bool) []string 
 }
 
 type Field struct {
-	Name            string      `json:"name,omitempty"`
-	NativeName      string      `json:"native_name,omitempty"`
-	Type            SchemaType  `json:"type,omitempty"`
-	ItemType        string      `json:"item_type,omitempty"`
-	NativeType      string      `json:"native_type,omitempty"`
-	Title           string      `json:"title,omitempty"`
-	Description     null.String `json:"description,omitempty"`
-	Relation        *Relation   `json:"relation,omitempty"`
-	RelationConfig  string      `json:"relation_config,omitempty"`
-	IsPrimary       bool        `json:"is_primary"`
-	IsUnsigned      bool        `json:"is_unsigned"`
-	IsAutoIncrement bool        `json:"is_auto_increment"`
+	Name            string     `json:"name,omitempty"`
+	NativeName      string     `json:"native_name,omitempty"`
+	Type            SchemaType `json:"type,omitempty"`
+	ItemType        string     `json:"item_type,omitempty"`
+	NativeType      string     `json:"native_type,omitempty"`
+	Title           string     `json:"title,omitempty"`
+	Description     string     `json:"description,omitempty"`
+	Relation        *Relation  `json:"relation,omitempty"`
+	RelationConfig  string     `json:"relation_config,omitempty"`
+	IsPrimary       bool       `json:"is_primary"`
+	IsUnsigned      bool       `json:"is_unsigned"`
+	IsAutoIncrement bool       `json:"is_auto_increment"`
 
 	// TODO 默认值配置实现
 	//DefaultConfig  string
@@ -345,10 +345,9 @@ func parseSchema(value any) (*Schema, error) {
 			continue
 		}
 		p := &Field{
-			Name:        fieldName,
-			NativeName:  strcase.ToSnake(fieldName),
-			IsRequired:  true,
-			Description: null.NewString("", false),
+			Name:       fieldName,
+			NativeName: strcase.ToSnake(fieldName),
+			IsRequired: true,
 		}
 		for k, v := range ParseTag(field.Tag("dba")) {
 			switch k {
@@ -365,7 +364,7 @@ func parseSchema(value any) (*Schema, error) {
 					p.RequiredConfig = v
 				}
 			case "desc":
-				p.Description = null.StringFrom(v)
+				p.Description = v
 			case "pk":
 				p.IsPrimary = true
 			case "incr":

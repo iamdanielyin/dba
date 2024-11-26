@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/iamdanielyin/dba"
 	"github.com/iamdanielyin/dba/examples"
+	_ "github.com/iamdanielyin/dba/examples/0-init"
 	_ "github.com/joho/godotenv/autoload"
 	"log"
 	"os"
@@ -11,13 +12,6 @@ import (
 )
 
 func main() {
-	if err := dba.Connect(&dba.ConnectConfig{
-		Driver: dba.MySQL,
-		Dsn:    os.Getenv("MYSQL"),
-	}); err != nil {
-		log.Fatal(err)
-	}
-
 	err := dba.RegisterSchema(
 		&examples.Group{},
 		&examples.Tag{},
@@ -27,7 +21,7 @@ func main() {
 	}
 
 	schs := dba.LookupSchema()
-	_ = os.WriteFile("schs.json", []byte(dba.JSONStringify(schs, true)), os.ModePerm)
+	_ = os.WriteFile("schemas.json", []byte(dba.JSONStringify(schs, true)), os.ModePerm)
 
 	if ddl := dba.Session().GenDDL(schs); ddl != "" {
 		_ = dba.EnsureDir("migrations")

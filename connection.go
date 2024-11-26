@@ -22,6 +22,18 @@ type Connection struct {
 	QueryTemplate  *template.Template
 }
 
+func (c *Connection) Name() string {
+	return c.name
+}
+
+func (c *Connection) Driver() string {
+	return c.driver.Name()
+}
+
+func (c *Connection) DSN() string {
+	return c.dsn
+}
+
 func (c *Connection) Init(schs ...map[string]*Schema) error {
 	var ss map[string]*Schema
 	if len(schs) > 0 {
