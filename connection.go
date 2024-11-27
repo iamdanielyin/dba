@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"github.com/jmoiron/sqlx"
+	"github.com/sirupsen/logrus"
 	"regexp"
 	"sort"
 	"strings"
@@ -16,6 +17,7 @@ type Connection struct {
 	dsn            string
 	name           string
 	xdb            *sqlx.DB
+	logger         *logrus.Logger
 	CreateTemplate *template.Template
 	UpdateTemplate *template.Template
 	DeleteTemplate *template.Template

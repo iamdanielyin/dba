@@ -5,9 +5,27 @@ import (
 	"github.com/Masterminds/sprig/v3"
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
+	"gopkg.in/natefinch/lumberjack.v2"
 	"sync"
 	"text/template"
+	"time"
 )
+
+var (
+	globalLogger = logrus.New()
+)
+
+func init() {
+	globalLogger.SetFormatter(&logrus.JSONFormatter{})
+	globalLogger.SetOutput(&lumberjack.Logger{
+		Filename:   "./logs/dba-" + time.Now().Format("20060102") + ".log", // 使用当前日期作为日志文件名
+		MaxSize:    100,                                                    // 每个日志文件的最大大小 (MB)
+		MaxBackups: 7,                                                      // 保留最多的旧日志文件
+		MaxAge:     30,                                                     // 保留旧日志的最大天数
+		Compress:   true,                                                   // 启用压缩旧日志文件
+	})
+}
 
 type Namespace struct {
 	Name        string
@@ -23,6 +41,7 @@ type ConnectConfig struct {
 	DeleteClauses string
 	UpdateClauses string
 	QueryClauses  string
+	Logger        *logrus.Logger
 }
 
 func (ns *Namespace) Connect(config *ConnectConfig) (*Connection, error) {
@@ -46,12 +65,17 @@ func (ns *Namespace) Connect(config *ConnectConfig) (*Connection, error) {
 		})
 		config.Name = fmt.Sprintf("%d", count)
 	}
+	logger := config.Logger
+	if logger == nil {
+		logger = globalLogger
+	}
 	conn := &Connection{
 		ns:     ns,
 		driver: driver,
 		dsn:    config.Dsn,
 		name:   config.Name,
 		xdb:    xdb,
+		logger: logger,
 	}
 	var (
 		createClauses = config.CreateClauses

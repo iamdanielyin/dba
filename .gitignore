@@ -28,3 +28,4 @@ test.db
 schemas.json
 migrations/
 localdb/storage/*
+logs

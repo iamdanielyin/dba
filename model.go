@@ -256,7 +256,13 @@ func (dm *DataModel) insertBatchWithTx(tx *sqlx.Tx, columns []string, vars [][]a
 		return 0, err
 	}
 
-	return r.LastInsertId()
+	lastInsertId, err := r.LastInsertId()
+	if err != nil {
+		dm.conn.logger.WithField("sql", sql).WithField("args", args).Errorf("Insert failed: %v", err)
+	} else {
+		dm.conn.logger.WithField("sql", sql).WithField("args", args).WithField("lastInsertId", lastInsertId).Infof("Insert successful")
+	}
+	return lastInsertId, err
 }
 
 func (dm *DataModel) afterCreate() {
@@ -677,9 +683,10 @@ func (r *Result) One(dst any) error {
 	sql = formatSQL(sql)
 
 	if err := autoScan(dst, r.dm.xdb, sql, attrs); err != nil {
+		r.dm.conn.logger.WithField("sql", sql).WithField("attrs", attrs).Errorf("Find one failed: %v", err)
 		return err
 	}
-
+	r.dm.conn.logger.WithField("sql", sql).WithField("attrs", attrs).Infof("Find one successful")
 	return r.afterQuery(dst)
 }
 
@@ -696,9 +703,10 @@ func (r *Result) All(dst any) error {
 	sql = formatSQL(sql)
 
 	if err := autoScan(dst, r.dm.xdb, sql, attrs); err != nil {
+		r.dm.conn.logger.WithField("sql", sql).WithField("attrs", attrs).Errorf("Find all failed: %v", err)
 		return err
 	}
-
+	r.dm.conn.logger.WithField("sql", sql).WithField("attrs", attrs).Infof("Find all successful")
 	return r.afterQuery(dst)
 }
 
@@ -716,9 +724,11 @@ func (r *Result) Count() (int, error) {
 
 	var count int
 	if err := r.dm.xdb.QueryRowx(sql, attrs...).Scan(&count); err != nil {
+		r.dm.conn.logger.WithField("sql", sql).WithField("attrs", attrs).Errorf("Count failed: %v", err)
 		return 0, err
 	}
 
+	r.dm.conn.logger.WithField("sql", sql).WithField("attrs", attrs).WithField("count", count).Infof("Count successful")
 	return count, nil
 }
 
@@ -790,6 +800,11 @@ func (r *Result) Update(doc any) (int, error) {
 		return 0, err
 	}
 	n, err := res.RowsAffected()
+	if err != nil {
+		r.dm.conn.logger.WithField("sql", sql).WithField("attrs", attrs).Errorf("Update failed: %v", err)
+	} else {
+		r.dm.conn.logger.WithField("sql", sql).WithField("attrs", attrs).WithField("rowsAffected", n).Infof("Update successful")
+	}
 	return int(n), err
 }
 
@@ -810,6 +825,11 @@ func (r *Result) Delete() (int, error) {
 		return 0, err
 	}
 	n, err := res.RowsAffected()
+	if err != nil {
+		r.dm.conn.logger.WithField("sql", sql).WithField("attrs", attrs).Errorf("Delete failed: %v", err)
+	} else {
+		r.dm.conn.logger.WithField("sql", sql).WithField("attrs", attrs).WithField("rowsAffected", n).Infof("Delete successful")
+	}
 	return int(n), err
 }
 
