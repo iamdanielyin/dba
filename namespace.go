@@ -134,13 +134,13 @@ func (ns *Namespace) SchemaBy(name string) *Schema {
 
 func (ns *Namespace) Schemas() []*Schema {
 	var result []*Schema
-	for _, item := range ns.LookupSchema() {
+	for _, item := range ns.SchemaBys() {
 		result = append(result, item)
 	}
 	return result
 }
 
-func (ns *Namespace) LookupSchema(names ...string) map[string]*Schema {
+func (ns *Namespace) SchemaBys(names ...string) map[string]*Schema {
 	nameMap := make(map[string]bool)
 	for _, name := range names {
 		nameMap[name] = true
@@ -158,7 +158,7 @@ func (ns *Namespace) LookupSchema(names ...string) map[string]*Schema {
 }
 
 func (ns *Namespace) setRelations() {
-	schs := ns.LookupSchema()
+	schs := ns.SchemaBys()
 	for schemaName, s := range schs {
 		var needUpdate bool
 		for fieldName, field := range s.Fields {
@@ -215,7 +215,7 @@ type ModelOptions struct {
 }
 
 func (ns *Namespace) Init(connectionName ...string) error {
-	schs := ns.LookupSchema()
+	schs := ns.SchemaBys()
 	if len(connectionName) == 0 {
 		connectionName = append(connectionName, "")
 	}

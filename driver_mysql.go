@@ -71,7 +71,9 @@ func (m *mysqlDriver) GenDDL(sortedNames []string, schs map[string]*Schema, igno
 		if len(columns) == 0 {
 			continue
 		}
-		columns = append(columns, fmt.Sprintf("PRIMARY KEY (%s)", strings.Join(primaryColumns, ",")))
+		if len(primaryColumns) > 0 {
+			columns = append(columns, fmt.Sprintf("PRIMARY KEY (%s)", strings.Join(primaryColumns, ",")))
+		}
 		var buffer bytes.Buffer
 		if len(ignoreComments) > 0 && !ignoreComments[0] {
 			buffer.WriteString(fmt.Sprintf("-- create \"%s\" table\n", sch.NativeName))

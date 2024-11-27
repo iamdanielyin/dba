@@ -2,17 +2,14 @@ package examples
 
 import "time"
 
-type SubscriptionPlan struct {
-}
-
 type Tenant struct {
-	ID       uint   `dba:"title=主键ID"`
+	ID       uint   `dba:"title=主键ID;pk"`
 	Name     string `dba:"title=租户名称"`
 	IsActive *bool  `dba:"title=是否激活"`
 }
 
 type User struct {
-	ID             uint         `dba:"title=主键ID"`
+	ID             uint         `dba:"title=主键ID;pk"`
 	Username       string       `dba:"title=用户名"`
 	Password       string       `dba:"title=密码"`
 	ProfileID      *uint        `dba:"title=用户详细信息ID"`
@@ -26,14 +23,14 @@ type User struct {
 }
 
 type UserProfile struct {
-	ID       uint   `dba:"name=id;title=详细信息ID"`
+	ID       uint   `dba:"name=id;title=详细信息ID;pk"`
 	UserID   uint   `dba:"name=user_id;title=用户ID"`
 	Birthday string `dba:"name=birthday;title=生日（YYYY-MM-DD格式）"`
 	Gender   string `dba:"name=gender;title=性别（男、女）"`
 }
 
 type Address struct {
-	ID          uint   `dba:"title=主键ID"`
+	ID          uint   `dba:"title=主键ID;pk"`
 	UserID      uint   `dba:"title=用户ID"`
 	User        *User  `dba:"title=用户ID;rel=REF_ONE,UserID->ID;"`
 	Name        string `dba:"title=收货人姓名"`
@@ -47,18 +44,18 @@ type Address struct {
 }
 
 type Group struct {
-	ID        uint      `dba:"title=群组ID"`
+	ID        uint      `dba:"title=群组ID;pk"`
 	Name      string    `dba:"title=群组名称"`
 	CreatedAt time.Time `dba:"title=创建时间"`
 }
 
 type Tag struct {
-	ID   uint   `dba:"title=标签ID"`
+	ID   uint   `dba:"title=标签ID;pk"`
 	Name string `dba:"title=标签名称"`
 }
 
 type UserGroup struct {
-	*Group   `dba:"title=关联群组;rel=REF_MANY"`
+	*Group   `dba:"title=关联群组;rel=REF_MANY_SCHEMA"`
 	GroupID  uint      `dba:"title=关联群组ID"`
 	UserID   uint      `dba:"title=用户ID"`
 	JoinedAt time.Time `dba:"title=加入时间"`

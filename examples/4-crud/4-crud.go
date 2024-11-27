@@ -3,20 +3,12 @@ package main
 import (
 	"github.com/iamdanielyin/dba"
 	"github.com/iamdanielyin/dba/examples"
+	_ "github.com/iamdanielyin/dba/examples/0-init"
 	"log"
-	"os"
 	"time"
 )
 
 func main() {
-	// 连接数据源
-	if err := dba.Connect(&dba.ConnectConfig{
-		Driver: dba.MySQL,
-		Dsn:    os.Getenv("MYSQL"),
-	}); err != nil {
-		log.Fatal(err)
-	}
-
 	// 注册元数据
 	err := dba.RegisterSchema(
 		&examples.Tenant{},
@@ -28,7 +20,7 @@ func main() {
 		&examples.UserGroup{},
 	)
 
-	// 自动数据库迁移
+	// 数据库迁移（自动建表）
 	if err := dba.Session().Init(); err != nil {
 		log.Fatal(err)
 	}

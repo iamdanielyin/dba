@@ -12,17 +12,21 @@ import (
 )
 
 func main() {
+	// 注册元数据
 	err := dba.RegisterSchema(
+		&examples.Tenant{},
+		&examples.User{},
+		&examples.UserProfile{},
+		&examples.Address{},
 		&examples.Group{},
 		&examples.Tag{},
+		&examples.UserGroup{},
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	schs := dba.LookupSchema()
-	_ = os.WriteFile("schemas.json", []byte(dba.JSONStringify(schs, true)), os.ModePerm)
-
+	schs := dba.SchemaBys()
 	if ddl := dba.Session().GenDDL(schs); ddl != "" {
 		_ = dba.EnsureDir("migrations")
 		_ = os.WriteFile(fmt.Sprintf("migrations/%s.sql", time.Now().Format("20060102150405")), []byte(ddl), os.ModePerm)

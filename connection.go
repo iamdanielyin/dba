@@ -40,7 +40,7 @@ func (c *Connection) Init(schs ...map[string]*Schema) error {
 		ss = schs[0]
 	}
 	if ss == nil {
-		ss = c.ns.LookupSchema()
+		ss = c.ns.SchemaBys()
 	}
 	ddl := c.GenDDL(ss)
 	if ddl != "" {

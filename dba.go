@@ -35,8 +35,8 @@ func SchemaBy(name string) *Schema {
 	return DefaultNamespace.SchemaBy(name)
 }
 
-func LookupSchema(name ...string) map[string]*Schema {
-	return DefaultNamespace.LookupSchema(name...)
+func SchemaBys(name ...string) map[string]*Schema {
+	return DefaultNamespace.SchemaBys(name...)
 }
 
 func Model(schemaName string, options ...*ModelOptions) *DataModel {

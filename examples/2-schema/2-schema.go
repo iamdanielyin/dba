@@ -5,6 +5,7 @@ import (
 	"github.com/iamdanielyin/dba/examples"
 	_ "github.com/joho/godotenv/autoload"
 	"log"
+	"os"
 )
 
 func main() {
@@ -20,18 +21,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	schemaNames := []string{
-		"Tenant",
-		"User",
-		"UserProfile",
-		"Address",
-		"Group",
-		"Tag",
-		"UserGroup",
-	}
-	for _, name := range schemaNames {
-		ModelSchema := dba.SchemaBy(name)
-		log.Println(ModelSchema.Name, ModelSchema.NativeName)
-	}
 
+	schs := dba.SchemaBys()
+	for name, sch := range schs {
+		log.Printf("Schema %s → %s\n", name, sch.NativeName)
+	}
+	_ = os.WriteFile(
+		"schemas.json",
+		[]byte(dba.JSONStringify(schs, true)),
+		os.ModePerm,
+	)
 }
