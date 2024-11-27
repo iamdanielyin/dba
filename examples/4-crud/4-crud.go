@@ -43,7 +43,7 @@ func main() {
 	}
 
 	// update
-	if _, err := Tenant.Find("ID >", 16).Update(&examples.Tenant{
+	if _, err := Tenant.Find("ID >", 1).Update(&examples.Tenant{
 		Name: "UPDATED",
 	}); err != nil {
 		log.Fatal(err)

@@ -767,6 +767,7 @@ func (r *Result) Update(doc any) (int, error) {
 	}
 	fields := r.dm.schema.Fields
 	var sets []string
+	var pairsAttrs []any
 	for k, v := range pairs {
 		f := fields[k]
 		if f.Valid() && f.NativeName != "" {
@@ -774,16 +775,22 @@ func (r *Result) Update(doc any) (int, error) {
 				sets = append(sets, fmt.Sprintf("%s = NULL", f.NativeName))
 			} else {
 				sets = append(sets, fmt.Sprintf("%s = ?", f.NativeName))
-				attrs = append(attrs, v)
+				pairsAttrs = append(pairsAttrs, v)
 			}
 		} else {
 			if s, isStr := v.(string); isStr && s == SetToNullFlag {
 				sets = append(sets, fmt.Sprintf("%s = NULL", k))
 			} else {
 				sets = append(sets, fmt.Sprintf("%s = ?", k))
-				attrs = append(attrs, v)
+				pairsAttrs = append(pairsAttrs, v)
 			}
 		}
+	}
+	if len(pairsAttrs) > 0 {
+		var tmp []any
+		tmp = append(tmp, pairsAttrs...)
+		tmp = append(tmp, attrs...)
+		attrs = tmp
 	}
 	if len(sets) > 0 {
 		data["Sets"] = strings.Join(sets, ", ")
