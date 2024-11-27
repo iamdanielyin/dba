@@ -3,14 +3,14 @@ package examples
 import "time"
 
 type Tenant struct {
-	ID       uint   `dba:"title=主键ID;pk"`
-	Name     string `dba:"title=租户名称"`
+	ID       uint   `dba:"title=主键ID;pk;incr"`
+	Name     string `dba:"title=租户名称;nn"`
 	IsActive *bool  `dba:"title=是否激活"`
 }
 
 type User struct {
-	ID             uint         `dba:"title=主键ID;pk"`
-	Username       string       `dba:"title=用户名"`
+	ID             uint         `dba:"title=主键ID;pk;incr"`
+	Username       string       `dba:"title=用户名;nn"`
 	Password       string       `dba:"title=密码"`
 	ProfileID      *uint        `dba:"title=用户详细信息ID"`
 	Profile        *UserProfile `dba:"title=用户详细信息;rel=HAS_ONE,ID->UserID"`
@@ -23,35 +23,34 @@ type User struct {
 }
 
 type UserProfile struct {
-	ID       uint   `dba:"name=id;title=详细信息ID;pk"`
-	UserID   uint   `dba:"name=user_id;title=用户ID"`
+	UserID   uint   `dba:"name=user_id;title=用户ID;pk"`
 	Birthday string `dba:"name=birthday;title=生日（YYYY-MM-DD格式）"`
 	Gender   string `dba:"name=gender;title=性别（男、女）"`
 }
 
 type Address struct {
-	ID          uint   `dba:"title=主键ID;pk"`
-	UserID      uint   `dba:"title=用户ID"`
-	User        *User  `dba:"title=用户ID;rel=REF_ONE,UserID->ID;"`
-	Name        string `dba:"title=收货人姓名"`
-	Phone       string `dba:"title=收货人电话"`
-	Province    string `dba:"title=省份"`
-	City        string `dba:"title=城市"`
-	District    string `dba:"title=区/县"`
-	AddressLine string `dba:"title=详细地址"`
-	PostalCode  string `dba:"title=邮政编码"`
-	IsDefault   *bool  `dba:"title=是否默认地址"`
+	ID         uint   `dba:"title=主键ID;pk;incr"`
+	UserID     uint   `dba:"title=用户ID;nn"`
+	User       *User  `dba:"title=用户;rel=REF_ONE,UserID->ID;"`
+	Name       string `dba:"title=收货人姓名;nn"`
+	Phone      string `dba:"title=收货人电话;nn"`
+	Province   string `dba:"title=省份;nn"`
+	City       string `dba:"title=城市;nn"`
+	District   string `dba:"title=区/县;nn"`
+	Address    string `dba:"title=详细地址;nn"`
+	PostalCode string `dba:"title=邮政编码"`
+	IsDefault  *bool  `dba:"title=是否默认地址"`
 }
 
 type Group struct {
-	ID        uint      `dba:"title=群组ID;pk"`
-	Name      string    `dba:"title=群组名称"`
+	ID        uint      `dba:"title=群组ID;pk;incr"`
+	Name      string    `dba:"title=群组名称;nn"`
 	CreatedAt time.Time `dba:"title=创建时间"`
 }
 
 type Tag struct {
-	ID   uint   `dba:"title=标签ID;pk"`
-	Name string `dba:"title=标签名称"`
+	ID   uint   `dba:"title=标签ID;pk;incr"`
+	Name string `dba:"title=标签名称;nn"`
 }
 
 type UserGroup struct {

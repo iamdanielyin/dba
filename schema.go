@@ -347,7 +347,7 @@ func parseSchema(value any) (*Schema, error) {
 		p := &Field{
 			Name:       fieldName,
 			NativeName: strcase.ToSnake(fieldName),
-			IsRequired: true,
+			IsRequired: false,
 		}
 		for k, v := range ParseTag(field.Tag("dba")) {
 			switch k {
@@ -357,9 +357,9 @@ func parseSchema(value any) (*Schema, error) {
 				p.NativeType = v
 			case "title":
 				p.Title = v
-			case "null":
+			case "nn":
 				b, err := strconv.ParseBool(v)
-				p.IsRequired = !b
+				p.IsRequired = b
 				if v != "" && err != nil {
 					p.RequiredConfig = v
 				}

@@ -186,13 +186,11 @@ func (ru *ReflectUtils) GetElemFieldOrKey(elem any, k string) (result any, isEmp
 	isEmpty = true
 	elemVal := reflect.ValueOf(elem)
 	fieldVal := getStructFieldOrMapValue(&elemVal, k)
-	if fieldVal == nil {
-		return nil, true
-	}
-	if !fieldVal.IsNil() && !fieldVal.IsZero() {
+
+	if hasValue(fieldVal) {
 		return fieldVal.Interface(), false
 	} else {
-		return fieldVal.Interface(), true
+		return nil, true
 	}
 }
 
@@ -203,13 +201,10 @@ func (ru *ReflectUtils) GetElemFieldOrKey(elem any, k string) (result any, isEmp
 func (ru *ReflectUtils) GetFieldOrKey(k string) (result any, isEmpty bool) {
 	isEmpty = true
 	fieldVal := getStructFieldOrMapValue(&ru.indirectVal, k)
-	if fieldVal == nil {
-		return nil, true
-	}
-	if !fieldVal.IsNil() && !fieldVal.IsZero() {
+	if hasValue(fieldVal) {
 		return fieldVal.Interface(), false
 	} else {
-		return fieldVal.Interface(), true
+		return nil, true
 	}
 }
 
@@ -636,7 +631,7 @@ func (ru *ReflectUtils) GetAllFieldsOrKeysAndValues(elem any) (map[string]any, e
 			fieldIndex := fieldStruct.Index[0]
 			if len(fieldStruct.Index) == 1 && fieldIndex > 0 {
 				fieldValue := val.Field(fieldIndex)
-				if !fieldValue.IsNil() && !fieldValue.IsZero() {
+				if hasValue(&fieldValue) {
 					result[fieldStruct.Name] = fieldValue.Interface()
 				}
 			} else {
@@ -654,7 +649,7 @@ func (ru *ReflectUtils) GetAllFieldsOrKeysAndValues(elem any) (map[string]any, e
 						}
 					}
 				}
-				if !v.IsNil() && !v.IsZero() {
+				if hasValue(&v) {
 					result[fieldStruct.Name] = v.Interface()
 				}
 			}
@@ -662,7 +657,7 @@ func (ru *ReflectUtils) GetAllFieldsOrKeysAndValues(elem any) (map[string]any, e
 	case reflect.Map:
 		for _, key := range val.MapKeys() {
 			val := val.MapIndex(key)
-			if !val.IsNil() && !val.IsZero() {
+			if hasValue(&val) {
 				result[fmt.Sprintf("%v", key.Interface())] = val.Interface()
 			}
 		}
@@ -815,4 +810,22 @@ func GetZeroSliceValueOfField(input any, fieldName string) (reflect.Value, error
 	}
 
 	return reflect.Value{}, fmt.Errorf("unsupported type: %s", v.Kind().String())
+}
+
+func hasValue(v *reflect.Value) bool {
+	// 如果 v 是零值
+	if v == nil || !v.IsValid() {
+		return false // 无效的值
+	}
+
+	// 对于指针、接口、切片、映射、通道等类型，可以使用 IsNil() 判断
+	switch v.Kind() {
+	case reflect.Ptr, reflect.Interface, reflect.Slice, reflect.Map, reflect.Chan:
+		// 只有这些类型可以是 nil
+		return !v.IsNil()
+	default:
+		// 对于其他类型，检查它们是否是零值
+		// 对于整数、浮点数、布尔类型、字符串等基本类型，零值都可以通过 `IsZero` 判断
+		return !v.IsZero()
+	}
 }
