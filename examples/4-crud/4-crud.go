@@ -38,7 +38,7 @@ func main() {
 
 	// query
 	var list []*examples.Tenant
-	if err := Tenant.Find().Select("ID", "Name").AddOr("ID >", 1, "Name $PREFIX", "2023").All(&list); err != nil {
+	if err := Tenant.Find().Select("ID", "Name").Or("ID >", 1, "Name $PREFIX", "2023").All(&list); err != nil {
 		log.Fatal(err)
 	}
 

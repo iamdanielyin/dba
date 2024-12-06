@@ -357,7 +357,7 @@ func parseSchema(value any) (*Schema, error) {
 				p.NativeType = v
 			case "title":
 				p.Title = v
-			case "nn":
+			case "required":
 				b, err := strconv.ParseBool(v)
 				p.IsRequired = b
 				if v != "" && err != nil {

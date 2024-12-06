@@ -297,17 +297,17 @@ type Result struct {
 }
 
 func (r *Result) Where(conditions ...any) *Result {
-	return r.AddAnd(conditions...)
+	return r.And(conditions...)
 }
 
-func (r *Result) AddAnd(conditions ...any) *Result {
+func (r *Result) And(conditions ...any) *Result {
 	if f := And(conditions...); f != nil {
 		r.filters = append(r.filters, f)
 	}
 	return r
 }
 
-func (r *Result) AddOr(conditions ...any) *Result {
+func (r *Result) Or(conditions ...any) *Result {
 	if f := Or(conditions...); f != nil {
 		r.filters = append(r.filters, f)
 	}
