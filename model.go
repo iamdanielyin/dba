@@ -877,7 +877,6 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 		return dst, fmt.Errorf("populate field failed: %s.%s", sch.Name, opts.Path)
 	}
 	dst = Item2List(dst)
-	fmt.Println(dst)
 	ru := reflect.Indirect(reflect.ValueOf(dst))
 	ns := conn.ns
 

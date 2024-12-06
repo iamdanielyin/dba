@@ -477,7 +477,7 @@ func parseRelation(config string, currentSchema *Schema, currentField *Field, sc
 		SrcSchema: currentSchema.Name,
 	}
 
-	_ = mergo.Merge(&rel, &currentField.Relation)
+	_ = mergo.Merge(&rel, currentField.Relation)
 	switch kind {
 	case HasOne,
 		HasMany,
