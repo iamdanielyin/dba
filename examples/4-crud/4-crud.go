@@ -9,17 +9,6 @@ import (
 )
 
 func main() {
-	// 注册元数据
-	err := dba.RegisterSchema(
-		&examples.Tenant{},
-		&examples.User{},
-		&examples.UserProfile{},
-		&examples.Address{},
-		&examples.Group{},
-		&examples.Tag{},
-		&examples.UserGroup{},
-	)
-
 	// 数据库迁移（自动建表）
 	if err := dba.Session().Init(); err != nil {
 		log.Fatal(err)
@@ -32,7 +21,7 @@ func main() {
 	doc := examples.Tenant{
 		Name: time.Now().Format(time.DateTime),
 	}
-	if err = Tenant.Create(&doc); err != nil {
+	if err := Tenant.Create(&doc); err != nil {
 		log.Fatal(err)
 	}
 

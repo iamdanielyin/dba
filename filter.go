@@ -199,7 +199,3 @@ func parseEntryList(v map[string]any) []*Entry {
 	}
 	return entries
 }
-
-func IN(name string, values ...any) *Entry {
-
-}

@@ -2,6 +2,7 @@ package __init
 
 import (
 	"github.com/iamdanielyin/dba"
+	"github.com/iamdanielyin/dba/examples"
 	"log"
 )
 
@@ -12,4 +13,14 @@ func init() {
 	}); err != nil {
 		log.Fatal(err)
 	}
+	// 注册元数据
+	_ = dba.RegisterSchema(
+		&examples.Tenant{},
+		&examples.User{},
+		&examples.UserProfile{},
+		&examples.Address{},
+		&examples.Group{},
+		&examples.Tag{},
+		&examples.UserGroup{},
+	)
 }
