@@ -29,21 +29,11 @@ const (
 	ConflictUpdate ConflictKind = "UPDATE"
 )
 
-type RelationWriteMode string
-
-const (
-	RelatesWriteModeIgnore  RelationWriteMode = "IGNORE"
-	RelatesWriteModeAppend  RelationWriteMode = "APPEND"
-	RelatesWriteModeUpsert  RelationWriteMode = "UPSERT"
-	RelatesWriteModeReplace RelationWriteMode = "REPLACE"
-)
-
 type CreateOptions struct {
-	BatchSize        int
-	SharedTx         bool                   // 用于指定是否所有批次共用一个事务
-	ConflictUpdates  *ConflictUpdateOptions // 指定冲突处理方式
-	RelatesWriteMode RelationWriteMode
-	RelatesWrites    *RelatesWriteOptions
+	BatchSize       int
+	SharedTx        bool                   // 用于指定是否所有批次共用一个事务
+	ConflictUpdates *ConflictUpdateOptions // 指定冲突处理方式
+	RelatesWrites   *RelatesWriteOptions
 }
 
 type ConflictUpdateOptions struct {
@@ -147,6 +137,9 @@ func (dm *DataModel) Create(value any, options ...*CreateOptions) error {
 
 		if !opts.SharedTx {
 			// 提交每个批次的事务
+			if err := dm.afterCreate(value, &opts); err != nil {
+				return err
+			}
 			if err := tx.Commit(); err != nil {
 				return err
 			}
@@ -165,11 +158,13 @@ func (dm *DataModel) Create(value any, options ...*CreateOptions) error {
 				insertID--
 			}
 		}
-		dm.afterCreate()
 	}
 
 	if opts.SharedTx {
 		// 所有批次共用一个事务，提交事务
+		if err := dm.afterCreate(value, &opts); err != nil {
+			return err
+		}
 		if err := tx.Commit(); err != nil {
 			return err
 		}
@@ -187,6 +182,17 @@ func extractRowVars(value any, columns []string, nativeFields map[string]*Field)
 		rowVars = append(rowVars, v)
 	}
 	return rowVars
+}
+
+func (dm *DataModel) ensureXtx() error {
+	if dm.xtx == nil {
+		if xtx, err := dm.xdb.Beginx(); err != nil {
+			return err
+		} else {
+			dm.xtx = xtx
+		}
+	}
+	return nil
 }
 
 func (dm *DataModel) insertBatchWithTx(tx *sqlx.Tx, columns []string, vars [][]any, opts *CreateOptions) (int64, error) {
@@ -265,8 +271,8 @@ func (dm *DataModel) insertBatchWithTx(tx *sqlx.Tx, columns []string, vars [][]a
 	return lastInsertId, err
 }
 
-func (dm *DataModel) afterCreate() {
-
+func (dm *DataModel) afterCreate(docs any, opts *CreateOptions) error {
+	return relatesWrite(docs, dm, opts.RelatesWrites)
 }
 
 func (dm *DataModel) Find(conditions ...any) *Result {
@@ -746,7 +752,20 @@ func (r *Result) Paginate(pageNum int, pageSize int, dst any) (totalRecords int,
 	return
 }
 
-func (r *Result) Update(doc any) (int, error) {
+func (r *Result) afterUpdate(doc any, opts *UpdateOptions) error {
+	return relatesWrite(doc, r.dm, opts.RelatesWrites)
+}
+
+type UpdateOptions struct {
+	RelatesWrites *RelatesWriteOptions
+}
+
+func (r *Result) Update(doc any, options ...*UpdateOptions) (int, error) {
+	var opts UpdateOptions
+	if len(options) > 0 && options[0] != nil {
+		opts = *options[0]
+	}
+
 	// FINAL
 	defer r.reset()
 
@@ -789,7 +808,10 @@ func (r *Result) Update(doc any) (int, error) {
 	sql := buff.String()
 	sql = formatSQL(sql)
 
-	res, err := r.dm.xdb.Exec(sql, attrs...)
+	if err := r.dm.ensureXtx(); err != nil {
+		return 0, err
+	}
+	res, err := r.dm.xtx.Exec(sql, attrs...)
 	if err != nil {
 		return 0, err
 	}
@@ -798,6 +820,9 @@ func (r *Result) Update(doc any) (int, error) {
 		r.dm.conn.logger.WithField("sql", sql).WithField("attrs", attrs).Errorf("Update failed: %v", err)
 	} else {
 		r.dm.conn.logger.WithField("sql", sql).WithField("attrs", attrs).WithField("rowsAffected", n).Infof("Update successful")
+	}
+	if err := r.afterUpdate(doc, &opts); err != nil {
+		return 0, err
 	}
 	return int(n), err
 }
@@ -1059,6 +1084,7 @@ func relatesQuery(dst any, conn *Connection, sch *Schema, opts *PopulateOptions)
 
 func calcFieldStrategy(sch *Schema, opts *RelatesWriteOptions) map[string]int {
 	fieldStrategy := make(map[string]int)
+	// 指定了的字段走策略
 	if opts != nil {
 		for _, item := range opts.IgnoreFields {
 			if item == "" || fieldStrategy[item] > 0 {
@@ -1084,18 +1110,16 @@ func calcFieldStrategy(sch *Schema, opts *RelatesWriteOptions) map[string]int {
 			}
 			fieldStrategy[item] = 4
 		}
-		if len(opts.ReplaceFields) == 0 {
-			// 设置默认策略
-			for _, f := range sch.Fields {
-				if !f.Valid() || f.Relation == nil {
-					continue
-				}
-				if fieldStrategy[f.Name] != 0 {
-					continue
-				}
-				fieldStrategy[f.Name] = 4
-			}
+	}
+	// 没指定的用replace兜底
+	for _, f := range sch.Fields {
+		if !f.Valid() || f.Relation == nil {
+			continue
 		}
+		if fieldStrategy[f.Name] != 0 {
+			continue
+		}
+		fieldStrategy[f.Name] = 4
 	}
 	return fieldStrategy
 }
@@ -1105,11 +1129,14 @@ type updatePair struct {
 	values any
 }
 
-func relatesWriteOnCreate(in any, SrcModel *DataModel, conn *Connection, sch *Schema, opts *RelatesWriteOptions) error {
-	inList := NewReflectValue(Item2List(in))
-	fieldStrategy := calcFieldStrategy(sch, opts)
+func relatesWrite(in any, SrcModel *DataModel, opts *RelatesWriteOptions) error {
+	srcSch := SrcModel.schema
+	tx := SrcModel.xtx
+	conn := SrcModel.conn
 	ns := conn.ns
 
+	fieldStrategy := calcFieldStrategy(srcSch, opts)
+	inList := NewReflectValue(Item2List(in))
 	for inIdx := 0; inIdx < inList.Len(); inIdx++ {
 		srcItem := NewReflectValue(inList.Index(inIdx))
 		srcItemValues := srcItem.Map()
@@ -1117,7 +1144,7 @@ func relatesWriteOnCreate(in any, SrcModel *DataModel, conn *Connection, sch *Sc
 			continue
 		}
 		for name, fieldValue := range srcItemValues {
-			field := sch.Fields[name]
+			field := srcSch.Fields[name]
 			if !field.Valid() || !field.Relation.Valid() || fieldStrategy[name] <= 0 {
 				continue
 			}
@@ -1131,7 +1158,10 @@ func relatesWriteOnCreate(in any, SrcModel *DataModel, conn *Connection, sch *Sc
 				continue
 			}
 
-			DstModel := ns.Model(rel.DstSchema, &ModelOptions{ConnectionName: conn.name})
+			DstModel := ns.Model(rel.DstSchema, &ModelOptions{
+				ConnectionName: conn.name,
+				Tx:             tx,
+			})
 			switch rel.Kind {
 			case HasOne:
 				storedDoc := NewReflectValue(NewVar(fieldValue))
