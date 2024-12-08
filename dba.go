@@ -46,21 +46,23 @@ func Model(schemaName string, options ...*ModelOptions) *DataModel {
 func Exec(query string, args ...any) (int, error) {
 	return ExecBy("", query, args)
 }
-func BatchExec(query string, args ...any) (int, error) {
-	return BatchExecBy("", query, args)
-}
 
-func Query(dst any, query string, args ...any) error {
-	return QueryBy("", dst, query, args)
+func ExecBatch(query string, args ...any) (int, error) {
+	return ExecByBatch("", query, args)
 }
 
 func ExecBy(connectionName string, query string, args ...any) (int, error) {
 	sess := DefaultNamespace.Session(connectionName)
 	return sess.Exec(query, args...)
 }
-func BatchExecBy(connectionName string, query string, args ...any) (int, error) {
+
+func ExecByBatch(connectionName string, query string, args ...any) (int, error) {
 	sess := DefaultNamespace.Session(connectionName)
 	return sess.BatchExec(query, args...)
+}
+
+func Query(dst any, query string, args ...any) error {
+	return QueryBy("", dst, query, args)
 }
 
 func QueryBy(connectionName string, dst any, query string, args ...any) error {
