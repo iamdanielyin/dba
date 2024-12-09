@@ -570,3 +570,11 @@ func IsNilOrZero(a any) bool {
 
 	return false
 }
+
+func Map2Struct(args map[string]any, dst any) error {
+	data, err := json.Marshal(args)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, dst)
+}

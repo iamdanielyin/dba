@@ -34,14 +34,14 @@ type Namespace struct {
 }
 
 type ConnectConfig struct {
-	Driver        string
-	Dsn           string
-	Name          string
-	CreateClauses string
-	DeleteClauses string
-	UpdateClauses string
-	QueryClauses  string
-	Logger        *logrus.Logger
+	Driver        string         `json:"driver,omitempty"`
+	Dsn           string         `json:"dsn,omitempty"`
+	Name          string         `json:"name,omitempty"`
+	CreateClauses string         `json:"create_clauses,omitempty"`
+	DeleteClauses string         `json:"delete_clauses,omitempty"`
+	UpdateClauses string         `json:"update_clauses,omitempty"`
+	QueryClauses  string         `json:"query_clauses,omitempty"`
+	Logger        *logrus.Logger `json:"-"`
 }
 
 func (ns *Namespace) Connect(config *ConnectConfig) (*Connection, error) {
