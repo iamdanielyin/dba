@@ -31,6 +31,10 @@ func RegisterSchema(values ...any) error {
 	return DefaultNamespace.RegisterSchema(values...)
 }
 
+func UnregisterSchema(names ...string) error {
+	return DefaultNamespace.UnregisterSchema(names...)
+}
+
 func SchemaBy(name string) *Schema {
 	return DefaultNamespace.SchemaBy(name)
 }
@@ -47,7 +51,7 @@ func Exec(query string, args ...any) (int, error) {
 	return ExecBy("", query, args)
 }
 
-func ExecBatch(query string, args ...any) (int, error) {
+func ExecBatch(query string, args ...any) ([]int, error) {
 	return ExecByBatch("", query, args)
 }
 
@@ -56,7 +60,7 @@ func ExecBy(connectionName string, query string, args ...any) (int, error) {
 	return sess.Exec(query, args...)
 }
 
-func ExecByBatch(connectionName string, query string, args ...any) (int, error) {
+func ExecByBatch(connectionName string, query string, args ...any) ([]int, error) {
 	sess := DefaultNamespace.Session(connectionName)
 	return sess.BatchExec(query, args...)
 }

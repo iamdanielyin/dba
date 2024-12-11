@@ -2,14 +2,15 @@ package dba
 
 import (
 	"fmt"
+	"sync"
+	"text/template"
+	"time"
+
 	"github.com/Masterminds/sprig/v3"
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/natefinch/lumberjack.v2"
-	"sync"
-	"text/template"
-	"time"
 )
 
 var (
@@ -143,6 +144,14 @@ func (ns *Namespace) RegisterSchema(value ...any) error {
 		ns.schemas.Store(item.Name, item)
 	}
 	// 所有模型注册完成后，再统一设置引用关系
+	ns.setRelations()
+	return nil
+}
+
+func (ns *Namespace) UnregisterSchema(names ...string) error {
+	for _, name := range names {
+		ns.schemas.Delete(name)
+	}
 	ns.setRelations()
 	return nil
 }

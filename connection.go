@@ -3,12 +3,13 @@ package dba
 import (
 	"database/sql"
 	"fmt"
-	"github.com/jmoiron/sqlx"
-	"github.com/sirupsen/logrus"
 	"regexp"
 	"sort"
 	"strings"
 	"text/template"
+
+	"github.com/jmoiron/sqlx"
+	"github.com/sirupsen/logrus"
 )
 
 type Connection struct {
@@ -80,11 +81,13 @@ func (c *Connection) Exec(query string, args ...any) (int, error) {
 	return int(n), err
 }
 
-func (c *Connection) BatchExec(query string, args ...any) (int, error) {
+func (c *Connection) BatchExec(query string, args ...any) ([]int, error) {
 	query = formatSQL(query)
 	tx, err := c.xdb.Begin()
+
+	var results []int
 	if err != nil {
-		return 0, err
+		return results, err
 	}
 	defer func() {
 		if err != nil {
@@ -101,21 +104,19 @@ func (c *Connection) BatchExec(query string, args ...any) (int, error) {
 		if stmt != "" {
 			stmtParams, newIndex, err := extractParams(stmt, args, paramIndex)
 			if err != nil {
-				return 0, err
+				return results, err
 			}
 
 			res, err = tx.Exec(stmt, stmtParams...)
 			if err != nil {
-				return 0, err
+				return results, err
 			}
 			paramIndex = newIndex
+			n, _ := res.RowsAffected()
+			results = append(results, int(n))
 		}
 	}
-	if res != nil {
-		n, _ := res.RowsAffected()
-		return int(n), err
-	}
-	return 0, nil
+	return results, nil
 }
 
 func extractParams(stmt string, params []any, paramIndex int) ([]any, int, error) {

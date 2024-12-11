@@ -5,11 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/bwmarrin/snowflake"
-	"github.com/google/uuid"
-	"github.com/guregu/null/v5"
-	"github.com/samber/lo"
-	"golang.org/x/crypto/bcrypt"
 	"io"
 	"math/rand"
 	"net/url"
@@ -20,6 +15,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bwmarrin/snowflake"
+	"github.com/google/uuid"
+	"github.com/guregu/null/v5"
+	"github.com/samber/lo"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Time tools
@@ -571,10 +572,18 @@ func IsNilOrZero(a any) bool {
 	return false
 }
 
-func Map2Struct(args map[string]any, dst any) error {
-	data, err := json.Marshal(args)
+func ConvertData(src, dst any) error {
+	// 将源对象转为JSON
+	data, err := json.Marshal(src)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal source: %v", err)
 	}
-	return json.Unmarshal(data, dst)
+
+	// 将JSON数据解码到目标对象
+	err = json.Unmarshal(data, dst)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal to destination: %v", err)
+	}
+
+	return nil
 }

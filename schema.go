@@ -1,17 +1,18 @@
 package dba
 
 import (
-	"dario.cat/mergo"
 	"database/sql"
-	"github.com/guregu/null/v5"
-	"github.com/iamdanielyin/structs"
-	"github.com/iancoleman/strcase"
-	"github.com/pkg/errors"
 	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"dario.cat/mergo"
+	"github.com/guregu/null/v5"
+	"github.com/iamdanielyin/structs"
+	"github.com/iancoleman/strcase"
+	"github.com/pkg/errors"
 )
 
 var structParsedMap sync.Map
@@ -283,6 +284,14 @@ func parseSchema(value any) (*Schema, error) {
 	if v, ok := value.(*Schema); ok {
 		return v, nil
 	}
+	if v, ok := value.(map[string]any); ok {
+		var s Schema
+		if err := ConvertData(v, &s); err != nil {
+			return nil, err
+		}
+		return &s, nil
+	}
+
 	reflectType := reflect.TypeOf(value)
 	if reflectType.Kind() == reflect.Ptr {
 		reflectType = reflectType.Elem()
