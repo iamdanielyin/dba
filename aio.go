@@ -1,5 +1,13 @@
 package dba
 
+import (
+	"fmt"
+	"github.com/jmoiron/sqlx"
+	"sync"
+)
+
+var txStore sync.Map
+
 type AioArgs struct {
 	Action string         `msgpack:"action"`
 	Data   map[string]any `msgpack:"data"`
@@ -117,33 +125,57 @@ func HandleAio(args *AioArgs) *AioReply {
 	// 模型操作
 	case "model_create":
 		var input struct {
-			ConnectionName string         `json:"connection_name"`
-			ModelName      string         `json:"model_name"`
-			ModelOptions   *ModelOptions  `json:"model_options"`
-			Data           any            `json:"data"`
-			Options        *CreateOptions `json:"options"`
+			TxID         string         `json:"tx_id"`
+			ModelName    string         `json:"model_name"`
+			ModelOptions *ModelOptions  `json:"model_options"`
+			Data         any            `json:"data"`
+			Options      *CreateOptions `json:"options"`
 		}
 		if err = ConvertData(args.Data, &input); err != nil {
 			return reply
 		}
-		// TODO 处理Tx
+		var tx *sqlx.Tx
+		if input.TxID != "" {
+			if t, e := loadTxWithStoreID(input.TxID); err != nil {
+				err = e
+				return reply
+			} else {
+				tx = t
+				if input.ModelOptions == nil {
+					input.ModelOptions = new(ModelOptions)
+				}
+				input.ModelOptions.Tx = tx
+			}
+		}
 		if err = Model(input.ModelName, input.ModelOptions).Create(input.Data, input.Options); err != nil {
 			return reply
 		}
 		reply.Data = map[string]any{"data": input.Data}
 	case "model_update":
 		var input struct {
-			ConnectionName string         `json:"connection_name"`
-			ModelName      string         `json:"model_name"`
-			ModelOptions   *ModelOptions  `json:"model_options"`
-			Filters        []any          `json:"filters"`
-			Data           any            `json:"data"`
-			Options        *UpdateOptions `json:"options"`
+			TxID         string         `json:"tx_id"`
+			ModelName    string         `json:"model_name"`
+			ModelOptions *ModelOptions  `json:"model_options"`
+			Filters      []any          `json:"filters"`
+			Data         any            `json:"data"`
+			Options      *UpdateOptions `json:"options"`
 		}
 		if err = ConvertData(args.Data, &input); err != nil {
 			return reply
 		}
-		// TODO 处理Tx
+		var tx *sqlx.Tx
+		if input.TxID != "" {
+			if t, e := loadTxWithStoreID(input.TxID); err != nil {
+				err = e
+				return reply
+			} else {
+				tx = t
+				if input.ModelOptions == nil {
+					input.ModelOptions = new(ModelOptions)
+				}
+				input.ModelOptions.Tx = tx
+			}
+		}
 		if n, e := Model(input.ModelName, input.ModelOptions).Find(input.Filters...).Update(input.Data, input.Options); e != nil {
 			err = e
 		} else {
@@ -151,16 +183,28 @@ func HandleAio(args *AioArgs) *AioReply {
 		}
 	case "model_delete":
 		var input struct {
-			ConnectionName string         `json:"connection_name"`
-			ModelName      string         `json:"model_name"`
-			ModelOptions   *ModelOptions  `json:"model_options"`
-			Filters        []any          `json:"filters"`
-			Options        *DeleteOptions `json:"options"`
+			TxID         string         `json:"tx_id"`
+			ModelName    string         `json:"model_name"`
+			ModelOptions *ModelOptions  `json:"model_options"`
+			Filters      []any          `json:"filters"`
+			Options      *DeleteOptions `json:"options"`
 		}
 		if err = ConvertData(args.Data, &input); err != nil {
 			return reply
 		}
-		// TODO 处理Tx
+		var tx *sqlx.Tx
+		if input.TxID != "" {
+			if t, e := loadTxWithStoreID(input.TxID); err != nil {
+				err = e
+				return reply
+			} else {
+				tx = t
+				if input.ModelOptions == nil {
+					input.ModelOptions = new(ModelOptions)
+				}
+				input.ModelOptions.Tx = tx
+			}
+		}
 		if n, e := Model(input.ModelName, input.ModelOptions).Find(input.Filters...).Delete(input.Options); e != nil {
 			err = e
 		} else {
@@ -226,6 +270,66 @@ func HandleAio(args *AioArgs) *AioReply {
 				"n": n,
 			}
 		}
+	case "tx_begin":
+		var input struct {
+			ConnectionName string `json:"connection_name"`
+		}
+		if err = ConvertData(args.Data, &input); err != nil {
+			return reply
+		}
+		if t, e := Session(input.ConnectionName).Begin(); e != nil {
+			err = e
+			return reply
+		} else {
+			addr := fmt.Sprintf("%p", t)
+			txStore.Store(addr, t)
+			reply.Data = map[string]any{
+				"tx_id": addr,
+			}
+			return reply
+		}
+	case "tx_commit":
+		var input struct {
+			TxID string `json:"tx_id"`
+		}
+		if err = ConvertData(args.Data, &input); err != nil {
+			return reply
+		}
+		var tx *sqlx.Tx
+		if t, e := loadTxWithStoreID(input.TxID); err != nil {
+			err = e
+			return reply
+		} else {
+			tx = t
+		}
+		err = tx.Commit()
+	case "tx_rollback":
+		var input struct {
+			TxID string `json:"tx_id"`
+		}
+		if err = ConvertData(args.Data, &input); err != nil {
+			return reply
+		}
+		var tx *sqlx.Tx
+		if t, e := loadTxWithStoreID(input.TxID); err != nil {
+			err = e
+			return reply
+		} else {
+			tx = t
+		}
+		err = tx.Rollback()
+	default:
 	}
 	return reply
+}
+
+func loadTxWithStoreID(tid string) (*sqlx.Tx, error) {
+	var tx *sqlx.Tx
+	if t, ok := txStore.Load(tid); ok {
+		tx = t.(*sqlx.Tx)
+	}
+	if tx == nil {
+		return nil, fmt.Errorf("tx not exist or expired: %s", tid)
+	}
+	return tx, fmt.Errorf("tx not exist or expired: %s", tid)
 }
