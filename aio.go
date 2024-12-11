@@ -24,7 +24,6 @@ func HandleAio(args *AioArgs) *AioReply {
 			reply.Msg = err.Error()
 		}
 	}()
-	// TODO 实现所有action
 	switch args.Action {
 	// 连接管理
 	case "connect":
