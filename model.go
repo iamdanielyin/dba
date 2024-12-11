@@ -3,12 +3,13 @@ package dba
 import (
 	"bytes"
 	"fmt"
-	"github.com/jmoiron/sqlx"
 	"math"
 	"reflect"
 	"strings"
 	"sync"
 	"text/template"
+
+	"github.com/jmoiron/sqlx"
 )
 
 type DataModel struct {
@@ -307,6 +308,9 @@ func (r *Result) Where(conditions ...any) *Result {
 }
 
 func (r *Result) And(conditions ...any) *Result {
+	if len(conditions) == 0 {
+		return r
+	}
 	if f := And(conditions...); f != nil {
 		r.filters = append(r.filters, f)
 	}
@@ -314,18 +318,31 @@ func (r *Result) And(conditions ...any) *Result {
 }
 
 func (r *Result) Or(conditions ...any) *Result {
+	if len(conditions) == 0 {
+		return r
+	}
 	if f := Or(conditions...); f != nil {
 		r.filters = append(r.filters, f)
 	}
 	return r
 }
 
-func (r *Result) OrderBy(name ...string) *Result {
-	return r.orderBy(false, name)
-}
-
-func (r *Result) OrderByDesc(name ...string) *Result {
-	return r.orderBy(true, name)
+func (r *Result) OrderBy(names ...string) *Result {
+	if len(names) == 0 {
+		return r
+	}
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if strings.HasPrefix(name, "-") {
+			r.orderBys[name[1:]] = true
+		} else {
+			r.orderBys[name] = false
+		}
+	}
+	return r
 }
 
 func (r *Result) Limit(limit int) *Result {
@@ -338,7 +355,10 @@ func (r *Result) Offset(offset int) *Result {
 	return r
 }
 
-func (r *Result) WithFields(names []string, isOmit bool) *Result {
+func (r *Result) Fields(names []string, isOmit bool) *Result {
+	if len(names) == 0 {
+		return r
+	}
 	for _, name := range names {
 		name = strings.TrimSpace(name)
 		if name == "" {
@@ -347,16 +367,16 @@ func (r *Result) WithFields(names []string, isOmit bool) *Result {
 		r.fields = append(r.fields, name)
 	}
 	r.fields = names
-	r.isOmit = false
+	r.isOmit = isOmit
 	return r
 }
 
 func (r *Result) Select(names ...string) *Result {
-	return r.WithFields(names, false)
+	return r.Fields(names, false)
 }
 
 func (r *Result) Omit(names ...string) *Result {
-	return r.WithFields(names, true)
+	return r.Fields(names, true)
 }
 
 type PopulateOptions struct {
@@ -372,6 +392,9 @@ type PopulateOptions struct {
 }
 
 func (r *Result) PopulateBy(options ...*PopulateOptions) *Result {
+	if len(options) == 0 {
+		return r
+	}
 	for _, option := range options {
 		if option == nil {
 			continue
@@ -386,21 +409,13 @@ func (r *Result) PopulateBy(options ...*PopulateOptions) *Result {
 }
 
 func (r *Result) Populate(names ...string) *Result {
+	if len(names) == 0 {
+		return r
+	}
 	for _, name := range names {
 		r.PopulateBy(&PopulateOptions{
 			Path: name,
 		})
-	}
-	return r
-}
-
-func (r *Result) orderBy(isDesc bool, names []string) *Result {
-	for _, name := range names {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		r.orderBys[name] = isDesc
 	}
 	return r
 }
@@ -827,7 +842,15 @@ func (r *Result) Update(doc any, options ...*UpdateOptions) (int, error) {
 	return int(n), err
 }
 
-func (r *Result) Delete() (int, error) {
+type DeleteOptions struct {
+}
+
+func (r *Result) Delete(options ...*DeleteOptions) (int, error) {
+	// var opts DeleteOptions
+	// if len(options) > 0 && options[0] != nil {
+	// 	opts = *options[0]
+	// }
+
 	// FINAL
 	defer r.reset()
 
