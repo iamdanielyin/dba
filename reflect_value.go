@@ -21,11 +21,26 @@ type ReflectValue struct {
 }
 
 func NewReflectValue(src any) *ReflectValue {
+	if src == nil {
+		return &ReflectValue{
+			src:   nil,
+			raw:   reflect.Value{},
+			Value: reflect.Value{},
+		}
+	}
+
 	var raw reflect.Value
 	switch v := src.(type) {
 	case reflect.Value:
 		raw = v
 	case *reflect.Value:
+		if v == nil {
+			return &ReflectValue{
+				src:   nil,
+				raw:   reflect.Value{},
+				Value: reflect.Value{},
+			}
+		}
 		raw = *v
 	default:
 		raw = reflect.ValueOf(v)
@@ -53,20 +68,36 @@ const (
 )
 
 func (rv *ReflectValue) ValueIs() ValueIs {
-	switch rv.Kind() {
+	v := rv.Value
+	if !v.IsValid() {
+		return ValueIsUnknown
+	}
+
+	// 处理指针类型
+	if v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			return ValueIsUnknown
+		}
+		v = v.Elem()
+	}
+
+	switch v.Kind() {
 	case reflect.Struct:
 		return ValueIsStruct
 	case reflect.Map:
 		return ValueIsMap
 	case reflect.Slice, reflect.Array:
-		elemType := rv.Type().Elem()
+		if v.IsNil() {
+			return ValueIsUnknown
+		}
+		elemType := v.Type().Elem()
+		// 处理元素为指针的情况
+		for elemType.Kind() == reflect.Ptr {
+			elemType = elemType.Elem()
+		}
 		switch elemType.Kind() {
 		case reflect.Struct:
 			return ValueIsStructArray
-		case reflect.Ptr:
-			if elemType.Elem().Kind() == reflect.Struct {
-				return ValueIsStructArray
-			}
 		case reflect.Map:
 			return ValueIsMapArray
 		default:
@@ -75,9 +106,8 @@ func (rv *ReflectValue) ValueIs() ValueIs {
 	default:
 		return ValueIsUnknown
 	}
-
-	return ValueIsUnknown
 }
+
 func (rv *ReflectValue) IsArray() bool {
 	vi := rv.ValueIs()
 	return vi == ValueIsStructArray || vi == ValueIsMapArray
@@ -92,46 +122,37 @@ func (rv *ReflectValue) Raw() *reflect.Value {
 }
 
 func (rv *ReflectValue) FieldByName(fieldName string) *reflect.Value {
+	if !rv.Value.IsValid() {
+		return nil
+	}
+
 	switch rv.Value.Kind() {
 	case reflect.Struct:
 		v := rv.Value
-		if v.IsValid() && v.IsZero() {
+		if v.IsZero() {
 			return nil
-		}
-		var fieldVal reflect.Value
-		if f, ok := v.Type().FieldByName(fieldName); !ok {
-			return nil
-		} else {
-			if len(f.Index) == 1 {
-				fieldVal = v.Field(f.Index[0])
-			} else {
-				fieldVal = v
-				for _, x := range f.Index {
-					fieldVal = reflect.Indirect(fieldVal.Field(x))
-					if !fieldVal.IsValid() || fieldVal.IsZero() {
-						break
-					}
-				}
-			}
 		}
 
-		if fieldVal.IsValid() && !fieldVal.IsZero() {
-			return &fieldVal
+		field := v.FieldByName(fieldName)
+		if !field.IsValid() {
+			return nil
 		}
+		return &field
+
 	case reflect.Map:
+		if rv.Value.IsNil() {
+			return nil
+		}
+
 		for _, key := range rv.Value.MapKeys() {
-			key = reflect.Indirect(key)
-			switch key.Kind() {
-			case reflect.String:
-				if key.Interface().(string) == fieldName {
-					fieldVal := rv.Value.MapIndex(key)
-					return &fieldVal
+			if key.String() == fieldName {
+				val := rv.Value.MapIndex(key)
+				if !val.IsValid() {
+					return nil
 				}
-			default:
-				continue
+				return &val
 			}
 		}
-	default:
 	}
 	return nil
 }
@@ -159,57 +180,83 @@ func (rv *ReflectValue) Values() []any {
 }
 
 func (rv *ReflectValue) Map() map[string]any {
+	if !rv.Value.IsValid() {
+		return nil
+	}
+
 	entries := make(map[string]any)
 
 	switch rv.Value.Kind() {
 	case reflect.Struct:
-		parseStructToMap(rv.Value, entries)
+		parseStructToMap(rv.Value, entries, nil)
 	case reflect.Map:
+		if rv.Value.IsNil() {
+			return entries
+		}
 		for _, k := range rv.Value.MapKeys() {
 			v := rv.Value.MapIndex(k)
-			entries[fmt.Sprintf("%v", k)] = v
+			if !v.IsValid() {
+				continue
+			}
+			// 处理接口类型
+			if v.Kind() == reflect.Interface {
+				v = v.Elem()
+			}
+			entries[fmt.Sprintf("%v", k)] = v.Interface()
 		}
-	default:
-		return nil
 	}
 
 	return entries
 }
 
-func parseStructToMap(v reflect.Value, result map[string]any) {
-	t := v.Type()
+func parseStructToMap(v reflect.Value, result map[string]any, visited map[uintptr]bool) {
+	if !v.IsValid() {
+		return
+	}
 
+	// 防止循环引用
+	if visited == nil {
+		visited = make(map[uintptr]bool)
+	}
+	ptr := v.Pointer()
+	if visited[ptr] {
+		return
+	}
+	visited[ptr] = true
+
+	t := v.Type()
 	for i := 0; i < v.NumField(); i++ {
 		field := v.Field(i)
 		fieldType := t.Field(i)
-		fieldName := fieldType.Name
 
-		if !field.IsValid() {
+		if !field.IsValid() || !fieldType.IsExported() {
 			continue
 		}
-		// 检查是否为嵌套结构体（指针或非指针）
-		if field.Kind() == reflect.Ptr {
-			// 如果是指针且非空，解引用指针
+
+		// 处理接口类型
+		if field.Kind() == reflect.Interface {
 			if !field.IsNil() {
 				field = field.Elem()
-			} else {
-				// 跳过空指针的嵌套结构体
-				continue
 			}
 		}
 
-		// 只处理非零值字段
+		// 处理指针类型
+		if field.Kind() == reflect.Ptr {
+			if field.IsNil() {
+				continue
+			}
+			field = field.Elem()
+		}
+
 		if field.IsZero() {
 			continue
 		}
 
-		// 处理嵌套结构体（包括匿名字段）
+		// 处理嵌套结构体
 		if field.Kind() == reflect.Struct {
-			// 递归解析嵌套结构体，直接将嵌套结构体的字段展开
-			parseStructToMap(field, result)
+			parseStructToMap(field, result, visited)
 		} else {
-			// 存储非零字段名和值到 map 中
-			result[fieldName] = field.Interface()
+			result[fieldType.Name] = field.Interface()
 		}
 	}
 }
@@ -328,12 +375,11 @@ func getStructField(v reflect.Value, fieldName string) (reflect.StructField, err
 	return reflect.StructField{}, fmt.Errorf("字段%s无法获取值", fieldName)
 }
 
-// SetFieldOrKey 设置指定结构体字段或 map 键的值。
-// 对于结构体类型，尝试获取字段的 reflect.Value 并设置新值。
-// 对于 map 类型，通过键名设置对应的值。
-// 如果字段不可设置或类型不支持，返回错误。
 func SetFieldOrKey(elem any, k string, v any) (err error) {
 	value := reflect.ValueOf(elem)
+	if !value.IsValid() {
+		return fmt.Errorf("invalid value")
+	}
 
 	switch value.Kind() {
 	case reflect.Struct, reflect.Ptr:
@@ -656,52 +702,102 @@ func SetFieldOrKey(elem any, k string, v any) (err error) {
 }
 
 func ReflectValueOf(ctx context.Context, structField reflect.StructField, structValue reflect.Value) reflect.Value {
-	if len(structField.Index) == 1 && structField.Index[0] > 0 {
-		return reflect.Indirect(structValue).Field(structField.Index[0])
-	} else {
-		v := reflect.Indirect(structValue)
-		for idx, fieldIdx := range structField.Index {
-			if fieldIdx >= 0 {
-				v = v.Field(fieldIdx)
-			} else {
-				v = v.Field(-fieldIdx - 1)
+	if !structValue.IsValid() {
+		return reflect.Value{}
+	}
 
+	v := reflect.Indirect(structValue)
+	if !v.IsValid() {
+		return reflect.Value{}
+	}
+
+	// 处理单个索引的情况
+	if len(structField.Index) == 1 {
+		if structField.Index[0] >= v.NumField() {
+			return reflect.Value{}
+		}
+		return v.Field(structField.Index[0])
+	}
+
+	// 处理嵌套字段
+	for idx, fieldIdx := range structField.Index {
+		if !v.IsValid() {
+			return reflect.Value{}
+		}
+
+		if fieldIdx >= 0 {
+			if fieldIdx >= v.NumField() {
+				return reflect.Value{}
+			}
+			v = v.Field(fieldIdx)
+		} else {
+			fieldIdx = -fieldIdx - 1
+			if fieldIdx >= v.NumField() {
+				return reflect.Value{}
+			}
+			v = v.Field(fieldIdx)
+
+			if v.Kind() == reflect.Ptr {
 				if v.IsNil() {
 					v.Set(reflect.New(v.Type().Elem()))
 				}
-
 				if idx < len(structField.Index)-1 {
 					v = v.Elem()
 				}
 			}
 		}
-		return v
 	}
+
+	return v
 }
 
 func CopyEmptyValue(typ reflect.Type) any {
-	// 根据元素类型创建相应的空值对象
+	if typ == nil {
+		return nil
+	}
+
 	switch typ.Kind() {
 	case reflect.Struct:
 		return reflect.New(typ).Elem().Interface()
 	case reflect.Ptr:
+		if typ.Elem() == nil {
+			return nil
+		}
 		return reflect.New(typ.Elem()).Interface()
 	case reflect.Map:
 		return reflect.MakeMap(typ).Interface()
+	case reflect.Slice:
+		return reflect.MakeSlice(typ, 0, 0).Interface()
+	case reflect.Array:
+		return reflect.New(typ).Elem().Interface()
+	case reflect.Chan:
+		return reflect.MakeChan(typ, 0).Interface()
 	default:
 		return reflect.Zero(typ).Interface()
 	}
 }
 
 func CopyEmptyArray(typ reflect.Type) any {
-	// 如果是指针类型，使用 reflect.New 创建一个相同类型的新指针
-	if typ.Kind() == reflect.Ptr {
-		// 使用 reflect.New 创建一个指向该类型的新指针
-		newPtr := reflect.New(typ.Elem())
-		return newPtr.Interface()
+	if typ == nil {
+		return nil
 	}
 
-	// 如果不是指针类型，直接创建一个相同类型的新值
-	newVal := reflect.New(typ).Elem()
-	return newVal.Interface()
+	switch typ.Kind() {
+	case reflect.Ptr:
+		if typ.Elem() == nil {
+			return nil
+		}
+		newPtr := reflect.New(typ.Elem())
+		// 如果指针指向的是数组或切片，初始化它
+		if typ.Elem().Kind() == reflect.Slice || typ.Elem().Kind() == reflect.Array {
+			newPtr.Elem().Set(reflect.MakeSlice(typ.Elem(), 0, 0))
+		}
+		return newPtr.Interface()
+	case reflect.Slice:
+		return reflect.MakeSlice(typ, 0, 0).Interface()
+	case reflect.Array:
+		return reflect.New(typ).Elem().Interface()
+	default:
+		return reflect.Zero(typ).Interface()
+	}
 }
