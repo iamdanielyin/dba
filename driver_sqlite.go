@@ -77,21 +77,42 @@ func (m *sqliteDriver) GenDDL(sortedNames []string, schs map[string]*Schema, ign
 }
 
 func (m *sqliteDriver) CreateClauses() string {
-	//TODO implement me
-	panic("implement me")
+	return `INSERT {{if eq .ConflictKind "IGNORE"}}OR IGNORE {{end}}INTO {{.Table}} ({{.Columns}})
+			VALUES
+			{{.Rows}}
+			{{if .ConflictUpdates}}
+			ON CONFLICT {{if .ConflictColumns}}({{.ConflictColumns}}){{end}} DO UPDATE 
+			SET {{.ConflictUpdates}}
+			{{end}}`
 }
 
 func (m *sqliteDriver) DeleteClauses() string {
-	//TODO implement me
-	panic("implement me")
+	return `DELETE FROM {{.Table}}
+			WHERE {{.Where}}`
 }
 
 func (m *sqliteDriver) UpdateClauses() string {
-	//TODO implement me
-	panic("implement me")
+	return `UPDATE {{.Table}}
+			SET {{.Sets}}
+			WHERE {{.Where}}`
 }
 
 func (m *sqliteDriver) QueryClauses() string {
-	//TODO implement me
-	panic("implement me")
+	return `SELECT {{if .Columns}}{{.Columns}}{{else}}*{{end}}
+			FROM {{.Table}}
+			{{if .Where}}
+			WHERE {{.Where}}
+			{{end}}
+			{{if .GroupBys}}
+			GROUP BY {{.GroupBys}}
+			{{end}}
+			{{if .Having}}
+			HAVING {{.Having}}
+			{{end}}
+			{{if .OrderBys}}
+			ORDER BY {{.OrderBys}}
+			{{end}}
+			{{if .Limit}}
+			LIMIT {{.Limit}}{{if .Offset}} OFFSET {{.Offset}}{{end}}
+			{{end}}`
 }
