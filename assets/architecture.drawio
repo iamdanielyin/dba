@@ -27,7 +27,7 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="F86FenMJojbOs5D3paeU-9" value="常用数据库" style="rounded=0;whiteSpace=wrap;html=1;hachureGap=4;fontFamily=Helvetica;fontSize=14;fontStyle=1;strokeWidth=2;verticalAlign=top;" parent="1" vertex="1">
+        <mxCell id="F86FenMJojbOs5D3paeU-9" value="常用数据库" style="rounded=0;whiteSpace=wrap;html=1;hachureGap=4;fontFamily=Helvetica;fontSize=14;fontStyle=1;strokeWidth=2;verticalAlign=top;dashed=1;" parent="1" vertex="1">
           <mxGeometry x="-48" y="61" width="230" height="465" as="geometry" />
         </mxCell>
         <mxCell id="F86FenMJojbOs5D3paeU-27" style="edgeStyle=orthogonalEdgeStyle;rounded=0;hachureGap=4;orthogonalLoop=1;jettySize=auto;html=1;fontFamily=Helvetica;fontSize=14;fontStyle=1;strokeWidth=2;" parent="1" source="VQzagpDQ9bd5nKbDUY4J-1" target="F86FenMJojbOs5D3paeU-26" edge="1">
@@ -248,7 +248,7 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="F86FenMJojbOs5D3paeU-143" value="信创数据库" style="rounded=0;whiteSpace=wrap;html=1;hachureGap=4;fontFamily=Helvetica;fontSize=14;fontStyle=1;strokeWidth=2;verticalAlign=top;" parent="1" vertex="1">
+        <mxCell id="F86FenMJojbOs5D3paeU-143" value="信创数据库" style="rounded=0;whiteSpace=wrap;html=1;hachureGap=4;fontFamily=Helvetica;fontSize=14;fontStyle=1;strokeWidth=2;verticalAlign=top;dashed=1;" parent="1" vertex="1">
           <mxGeometry x="-48" y="550" width="230" height="254" as="geometry" />
         </mxCell>
         <mxCell id="F86FenMJojbOs5D3paeU-144" value="DM 达梦数据库" style="rounded=0;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#d5e8d4;strokeColor=#82b366;fillStyle=solid;fontSize=14;fontFamily=Helvetica;strokeWidth=2;" parent="1" vertex="1">
