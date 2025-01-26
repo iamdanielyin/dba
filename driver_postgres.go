@@ -53,7 +53,7 @@ func (m *postgresDriver) GenDDL(sortedNames []string, schs map[string]*Schema, i
 				continue
 			}
 			buffer.WriteString(nativeType)
-			if field.IsRequired || field.IsPrimary {
+			if field.IsRequired() || field.IsPrimary {
 				buffer.WriteString(" NOT NULL")
 			} else {
 				buffer.WriteString(" NULL")

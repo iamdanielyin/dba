@@ -52,7 +52,7 @@ func (m *mysqlDriver) GenDDL(sortedNames []string, schs map[string]*Schema, igno
 			if field.IsUnsigned {
 				buffer.WriteString(" UNSIGNED")
 			}
-			if field.IsRequired || field.IsPrimary {
+			if field.IsRequired() || field.IsPrimary {
 				buffer.WriteString(" NOT NULL")
 			} else {
 				buffer.WriteString(" NULL")

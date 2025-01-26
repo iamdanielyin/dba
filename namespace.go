@@ -209,18 +209,18 @@ func (ns *Namespace) setRelations() {
 							NativeName: rel.BrgSchema,
 							Fields: map[string]*Field{
 								rel.BrgSrcField: {
-									Name:       rel.BrgSrcField,
-									NativeName: rel.BrgSrcField,
-									IsRequired: true,
-									Type:       srcField.Type,
-									NativeType: srcField.NativeType,
+									Name:           rel.BrgSrcField,
+									NativeName:     rel.BrgSrcField,
+									RequiredConfig: "true",
+									Type:           srcField.Type,
+									NativeType:     srcField.NativeType,
 								},
 								rel.BrgDstField: {
-									Name:       rel.BrgDstField,
-									NativeName: rel.BrgDstField,
-									IsRequired: true,
-									Type:       dstField.Type,
-									NativeType: dstField.NativeType,
+									Name:           rel.BrgDstField,
+									NativeName:     rel.BrgDstField,
+									RequiredConfig: "true",
+									Type:           dstField.Type,
+									NativeType:     dstField.NativeType,
 								},
 							},
 						}

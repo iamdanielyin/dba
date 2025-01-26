@@ -54,7 +54,7 @@ func (m *sqliteDriver) GenDDL(sortedNames []string, schs map[string]*Schema, ign
 					primaryColumns = append(primaryColumns, field.NativeName)
 				}
 			} else {
-				if field.IsRequired {
+				if field.IsRequired() {
 					buffer.WriteString(" NOT NULL")
 				} else {
 					buffer.WriteString(" NULL")

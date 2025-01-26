@@ -1,9 +1,9 @@
 package dba
 
 import (
+	"context"
 	"database/sql"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -201,23 +201,25 @@ type Field struct {
 	NativeType      string     `json:"native_type,omitempty"`
 	Title           string     `json:"title,omitempty"`
 	Description     string     `json:"description,omitempty"`
+	Example         string     `json:"example,omitempty"`
 	Relation        *Relation  `json:"relation,omitempty"`
 	RelationConfig  string     `json:"relation_config,omitempty"`
 	IsPrimary       bool       `json:"is_primary"`
 	IsUnsigned      bool       `json:"is_unsigned"`
 	IsAutoIncrement bool       `json:"is_auto_increment"`
+	DictCode        string     `json:"dict_code,omitempty"`
 
 	// TODO 默认值配置实现
-	//DefaultConfig  string
+	DefaultConfig string
 	// TODO 必填配置实现
-	IsRequired     bool   `json:"is_required"`
 	RequiredConfig string `json:"required_config,omitempty"`
+	RequiredGroup  string `json:"required_group,omitempty"`
+	RequiredOp     string `json:"required_op,omitempty"`
 	// TODO 唯一值配置实现
-	//IsUnique       bool
-	//UniqueConfig   string
+	UniqueConfig string
 	// TODO 枚举值配置实现
-	//IsEnum         bool
-	//EnumConfig     string
+	EnumConfig     string `json:"enum_config,omitempty"`
+	VirtualHandler func(ctx context.Context, docPtr any) any
 }
 
 func (f *Field) Valid() bool {
@@ -229,6 +231,10 @@ func (f *Field) IsScalarType() bool {
 		return false
 	}
 	return scalarTypeMap[f.Type]
+}
+
+func (f *Field) IsRequired() bool {
+	return f.RequiredConfig != ""
 }
 
 func (f *Field) Clone() *Field {
@@ -356,22 +362,28 @@ func parseSchema(value any) (*Schema, error) {
 		p := &Field{
 			Name:       fieldName,
 			NativeName: strcase.ToSnake(fieldName),
-			IsRequired: false,
 		}
 		for k, v := range ParseTag(field.Tag("dba")) {
 			switch k {
 			case "name":
+				p.Title = v
+			case "native":
 				p.NativeName = v
 			case "type":
 				p.NativeType = v
-			case "title":
-				p.Title = v
-			case "required":
-				b, err := strconv.ParseBool(v)
-				p.IsRequired = b
-				if v != "" && err != nil {
-					p.RequiredConfig = v
+			case "enum":
+				p.EnumConfig = v
+			case "dict":
+				p.DictCode = v
+			case "required", "required_group", "req_group":
+				p.RequiredGroup = v
+				if p.RequiredOp == "" {
+					p.RequiredOp = "OR" // 组内任一字段必填
 				}
+			case "required_op", "req_op":
+				p.RequiredOp = v
+			case "default", "default_value":
+				p.DefaultConfig = v
 			case "desc":
 				p.Description = v
 			case "pk":
@@ -416,7 +428,6 @@ func parseFieldType(fieldNewValue any, fieldKind reflect.Kind, p *Field) {
 	case sql.NullInt16, sql.NullInt32, sql.NullInt64, null.Int,
 		*sql.NullInt16, *sql.NullInt32, *sql.NullInt64, *null.Int:
 		p.Type = Integer
-		p.IsRequired = false
 	case uint, uint8, uint16, uint32, uint64, uintptr,
 		*uint, *uint8, *uint16, *uint32, *uint64, *uintptr:
 		p.Type = Integer
@@ -427,24 +438,20 @@ func parseFieldType(fieldNewValue any, fieldKind reflect.Kind, p *Field) {
 	case sql.NullFloat64, null.Float,
 		*sql.NullFloat64, *null.Float:
 		p.Type = Float
-		p.IsRequired = false
 	case bool, *bool:
 		p.Type = Boolean
 	case sql.NullBool, null.Bool,
 		*sql.NullBool, *null.Bool:
 		p.Type = Boolean
-		p.IsRequired = false
 	case string, *string:
 	case sql.NullString, null.String,
 		*sql.NullString, *null.String:
 		p.Type = String
-		p.IsRequired = false
 	case time.Time, *time.Time:
 		p.Type = Time
 	case sql.NullTime, null.Time,
 		*sql.NullTime, *null.Time:
 		p.Type = Time
-		p.IsRequired = false
 	}
 	if p.Type == "" {
 		switch fieldKind {

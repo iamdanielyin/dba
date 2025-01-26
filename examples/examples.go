@@ -1,61 +1,128 @@
 package examples
 
-import "time"
+import (
+	"context"
+	"fmt"
+	"github.com/iamdanielyin/dba"
+	"time"
+)
 
-type Tenant struct {
-	ID       uint   `dba:"title=主键ID;pk;incr"`
-	Name     string `dba:"title=租户名称;required"`
-	IsActive *bool  `dba:"title=是否激活"`
+type Org struct {
+	Code string `dba:"name=组织代码;pk"`
+	Name string `dba:"name=组织名称;required"`
 }
 
 type User struct {
-	ID             uint         `dba:"title=主键ID;pk;incr"`
-	Username       string       `dba:"title=用户名;required"`
-	Password       string       `dba:"title=密码"`
-	ProfileID      *uint        `dba:"title=用户详细信息ID"`
-	Profile        *UserProfile `dba:"title=用户详细信息;rel=HAS_ONE,ID->UserID"`
-	Addresses      []*Address   `dba:"title=收货地址;rel=HAS_MANY,ID->UserID"`
-	DefaultAddress *Address     `dba:"title=默认收货地址;rel=HAS_ONE,DefaultAddressID->UserID;rel_filter=IsDefault:true"`
-	TenantID       uint         `dba:"title=所属租户ID"`
-	Tenant         *Tenant      `dba:"title=所属租户;rel=REF_ONE,TenantID->ID"`
-	Tags           []*Tag       `dba:"title=已有标签;rel=REF_MANY,user_tag_refers(id->user_id,id->tag_id)"` // 直接对表
-	Groups         []*UserGroup `dba:"title=已加群组;rel=REF_MANY,UserGroup(ID->UserID,ID->GroupID)"`
+	AuditInfoUser
+	AuditInfoTime
+	AuditInfoOrg
+	ID                  uint       `dba:"name=主键ID;pk;incr"`
+	Username            string     `dba:"name=用户名;req"`
+	FirstName           string     `dba:"name=名字"`
+	LastName            string     `dba:"name=姓氏"`
+	Password            string     `dba:"name=密码"`
+	Email               string     `dba:"name=邮箱地址;req_group:USER_CONTACT"`
+	CountryCode         string     `dba:"name=地区代码"`
+	LocalPhoneNumber    string     `dba:"name=本地电话号码"`
+	Gender              string     `dba:"name=性别;enum=1:男,2:女,-1:未知;default=-1"`
+	Height              float64    `dba:"name=身高（CM）"`
+	Weight              float64    `dba:"name=体重（KG）"`
+	AllowLogin          *bool      `dba:"name=是否允许界面登录"`
+	FirstLoginTime      time.Time  `dba:"name=首次登录时间"`
+	LastLoginTime       time.Time  `dba:"name=最后登录时间"`
+	PasswordLastUpdated *time.Time `dba:"name=密码最后修改时间;desc=用于提醒用户定期修改密码"`
+
+	LockRiskCount  int        `dba:"name=锁定风控计数;desc=每密码错误+1，解锁时重置"`
+	IsLocked       *bool      `dba:"name=是否锁定"`
+	LastLockTime   *time.Time `dba:"name=最后锁定时间"`
+	LastUnlockerID uint       `dba:"name=最后解锁人ID"`
+	LastUnlockTime time.Time  `dba:"name=最后解锁时间"`
+
+	ProfileID *uint        `dba:"name=用户详细信息ID"`
+	Profile   *UserProfile `dba:"name=用户详细信息;has_one=UserProfile,sk:ID,dk:UserID"`
+
+	SocialMediaAccounts []*UserSocialMediaAccounts `dba:"name=社交平台账号;has_many=UserSocialMediaAccounts,sk:ID,dk:UserID"`
+
+	OrgCode uint `dba:"name=所属组织代码"`
+	Org     *Org `dba:"name=所属组织;ref_one=Org,sk:OrgCode,dk:Code"`
+
+	Tags []*Tag `dba:"name=已有标签;ref_many=UserTagRefers,sk:ID,sk_bridge:UserID,dk:ID,dk_bridge:TagID"` // ref_many:中间表,当前主键,中间表当前主键,目标主键,中间表目标主键
+
+	UserTagRefers []struct {
+		UserID uint `dba:"name=用户ID;native:user_id"`
+		TagID  uint `dba:"name=标签ID;native:tag_id"`
+	} `dba:"ref_many_bridge"`
+}
+
+func (User) VirtualFields() map[string]dba.Field {
+	return map[string]dba.Field{
+		"FullNameCn": {
+			Title: "中文姓名",
+			Type:  dba.String,
+			VirtualHandler: func(ctx context.Context, docPtr any) any {
+				u := docPtr.(*User)
+				return fmt.Sprintf("%s%s", u.LastName, u.FirstName)
+			},
+		},
+		"FullNameEn": {
+			Title: "英文全名",
+			Type:  dba.String,
+			VirtualHandler: func(ctx context.Context, docPtr any) any {
+				u := docPtr.(*User)
+				return fmt.Sprintf("%s·%s", u.LastName, u.FirstName)
+			},
+		},
+		"PhoneNumber": {
+			Title:         "电话号码",
+			Description:   "带加号和地区代码的完整电话号码",
+			Example:       "+8613800138000",
+			Type:          dba.String,
+			RequiredGroup: "USER_CONTACT",
+			VirtualHandler: func(ctx context.Context, docPtr any) any {
+				u := docPtr.(*User)
+				return fmt.Sprintf("+%s%s", u.CountryCode, u.LocalPhoneNumber)
+			},
+		},
+	}
+}
+
+type UserSocialMediaAccounts struct {
+	ID              uint   `dba:"name=主键;pk;incr"`
+	UserID          uint   `dba:"name=关联用户ID"`
+	PlatformCode    string `dba:"name=社交平台代码;dict:SOCIAL_MEDIA_PLATFORM"` // TODO 关联系统字典定义
+	PlatformAccount string `dba:"name=社交平台账号"`
 }
 
 type UserProfile struct {
-	UserID   uint   `dba:"name=user_id;title=用户ID;pk"`
-	Birthday string `dba:"name=birthday;title=生日（YYYY-MM-DD格式）"`
-	Gender   string `dba:"name=gender;title=性别（男、女）"`
-}
-
-type Address struct {
-	ID         uint   `dba:"title=主键ID;pk;incr"`
-	UserID     uint   `dba:"title=用户ID;required"`
-	User       *User  `dba:"title=用户;rel=REF_ONE,UserID->ID;"`
-	Name       string `dba:"title=收货人姓名;required"`
-	Phone      string `dba:"title=收货人电话;required"`
-	Province   string `dba:"title=省份;required"`
-	City       string `dba:"title=城市;required"`
-	District   string `dba:"title=区/县;required"`
-	Address    string `dba:"title=详细地址;required"`
-	PostalCode string `dba:"title=邮政编码"`
-	IsDefault  *bool  `dba:"title=是否默认地址"`
-}
-
-type Group struct {
-	ID        uint      `dba:"title=群组ID;pk;incr"`
-	Name      string    `dba:"title=群组名称;required"`
-	CreatedAt time.Time `dba:"title=创建时间"`
+	UserID   uint   `dba:"name=用户ID;pk"`
+	Birthday string `dba:"name=生日（YYYY-MM-DD格式）"`
 }
 
 type Tag struct {
-	ID   uint   `dba:"title=标签ID;pk;incr"`
-	Name string `dba:"title=标签名称;required"`
+	ID   uint   `dba:"name=标签ID;pk;incr"`
+	Name string `dba:"name=标签名称;required"`
 }
 
-type UserGroup struct {
-	*Group   `dba:"title=关联群组;rel=REF_MANY_SCHEMA"`
-	GroupID  uint      `dba:"title=关联群组ID"`
-	UserID   uint      `dba:"title=用户ID"`
-	JoinedAt time.Time `dba:"title=加入时间"`
+type AuditInfoTime struct {
+	CreatedAt time.Time  `dba:"name=创建时间"`
+	UpdatedAt time.Time  `dba:"name=最后修改时间"`
+	DeletedAt *time.Time `dba:"name=逻辑删除时间"`
+}
+
+type AuditInfoUser struct {
+	CreatedByID      int    `dba:"name=创建人ID"`
+	CreatedByAccount string `dba:"name=创建人账号"`
+	CreatedByName    string `dba:"name=创建人名称"`
+
+	UpdatedByID      int    `dba:"name=修改人ID"`
+	UpdatedByAccount string `dba:"name=修改人账号"`
+	UpdatedByName    string `dba:"name=修改人名称"`
+
+	DeletedByID      int    `dba:"name=删除人ID"`
+	DeletedByAccount string `dba:"name=删除人账号"`
+	DeletedByName    string `dba:"name=删除人名称"`
+}
+
+type AuditInfoOrg struct {
+	OrgCode int `dba:"name=组织代码"`
 }
