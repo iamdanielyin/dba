@@ -15,12 +15,10 @@ func init() {
 	}
 	// 注册元数据
 	_ = dba.RegisterSchema(
-		&examples.Tenant{},
+		&examples.Org{},
 		&examples.User{},
+		&examples.UserSocialMediaAccounts{},
 		&examples.UserProfile{},
-		&examples.Address{},
-		&examples.Group{},
 		&examples.Tag{},
-		&examples.UserGroup{},
 	)
 }
